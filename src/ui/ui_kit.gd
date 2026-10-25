@@ -63,5 +63,6 @@ static func button(text: String, on_pressed: Callable) -> Button:
 	b.text = text
 	b.focus_mode = Control.FOCUS_NONE
 	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	b.pressed.connect(func() -> void: Events.ui_sound_requested.emit("click"))
 	b.pressed.connect(on_pressed)
 	return b

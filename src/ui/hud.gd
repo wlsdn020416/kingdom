@@ -7,7 +7,45 @@ const MESSAGE_LIMIT := 4
 const MESSAGE_TIME := 4.0
 const MARGIN := 16.0
 const MINIMAP_SIZE := 180.0
-const RESOURCES_PER_LINE := 3
+const STATUS_WIDTH := 276.0
+const RESOURCE_COLUMNS := 3
+const RESOURCE_ICON_SIZE := 24
+const MATERIAL_TEXTURE := preload("res://assets/ui/material_icons.png")
+const MATERIAL_ORDER := EquipmentPanel.MATERIAL_ORDER
+
+
+## 시간 규칙은 소유하지 않고 전달받은 하루의 진행만 그린다.
+class ClockFace extends Control:
+	var cycle := 0.0
+	var night := false
+
+
+	func _init() -> void:
+		custom_minimum_size = Vector2(76, 76)
+		mouse_filter = Control.MOUSE_FILTER_PASS
+
+
+	func _draw() -> void:
+		var center := size * 0.5
+		draw_circle(center + Vector2(0, 2), 35, Color("10151d"))
+		draw_circle(center, 34, Color("4c5969"))
+		draw_circle(center, 31, Color("151e2b"))
+		draw_arc(center, 27, PI, TAU, 40, Color("ddba70"), 4)
+		draw_arc(center, 27, 0, PI, 40, Color("768cce"), 4)
+		for tick: int in range(12):
+			var direction := Vector2.from_angle(tick * TAU / 12.0)
+			draw_line(center + direction * 20, center + direction * 23, Color("b4b7b3"), 1)
+		var sun := center + Vector2(0, -14)
+		draw_circle(sun, 4, Color("ffe09a"))
+		var moon := center + Vector2(0, 14)
+		draw_circle(moon, 4, Color("b8c9ff"))
+		draw_circle(moon + Vector2(2, -2), 3.5, Color("151e2b"))
+		var hand := Vector2.from_angle(PI + cycle * TAU)
+		var color := Color("b8c9ff") if night else Color("ffe09a")
+		draw_line(center - hand * 5, center + hand * 23, Color("10151d"), 5)
+		draw_line(center - hand * 4, center + hand * 23, color, 2)
+		draw_circle(center, 3, color)
+
 
 var equipment_panel: EquipmentPanel
 var storage_panel: StoragePanel
@@ -21,10 +59,16 @@ var _main: Main
 var _day_label: Label
 var _core_bar: ProgressBar
 var _hp_bar: ProgressBar
-var _stock_label: Label
-var _info_label: Label
+var _status_panel: PanelContainer
+var _clock_face: ClockFace
+var _phase_label: Label
+var _resource_toggle: Button
+var _resource_drawer: VBoxContainer
+var _bag_label: Label
+var _resource_counts: Dictionary = {}
 var _messages: VBoxContainer
 var _big_map: MapView
+var _action_bar: ActionBar
 
 
 func setup(main: Main) -> void:
@@ -43,19 +87,19 @@ func setup(main: Main) -> void:
 	equipment_panel.setup(main.player.equipment, main.player.inventory)
 	storage_panel = StoragePanel.new()
 	add_child(storage_panel)
-	storage_panel.setup(main.kingdom, main.player)
+	storage_panel.setup(main.kingdom, main.player, main.kingdom_sync)
 	build_menu = BuildMenu.new()
 	add_child(build_menu)
 	build_menu.setup(main.build_mode, main.kingdom, main.player)
 	crafting_panel = CraftingPanel.new()
 	add_child(crafting_panel)
-	crafting_panel.setup(main.kingdom, main.player)
+	crafting_panel.setup(main.kingdom, main.player, main.kingdom_sync)
 	passive_panel = PassivePanel.new()
 	add_child(passive_panel)
 	passive_panel.setup(main.player.progression)
 	meeting_panel = MeetingPanel.new()
 	add_child(meeting_panel)
-	meeting_panel.setup(main.map_state)
+	meeting_panel.setup(main.map_state, main.map_sync, main.meeting_sync)
 	game_over_panel = GameOverPanel.new()
 	add_child(game_over_panel)
 	Events.message.connect(show_message)
@@ -90,60 +134,128 @@ func _process(_delta: float) -> void:
 	if _main == null:
 		return
 	var clock := _main.day_night
-	_day_label.text = "DAY %d   %s %d초" % [clock.day, "밤 · 침공 중" if clock.is_night() else "낮", ceili(clock.time_left())]
-	_day_label.add_theme_color_override("font_color", Color("9fb4ff") if clock.is_night() else Color("ffe08a"))
+	_day_label.text = "%d일차" % clock.day
+	_phase_label.text = "밤 · 침공 중" if clock.is_night() else "낮 · 탐험 시간"
+	_phase_label.add_theme_color_override("font_color", Color("b8c9ff") if clock.is_night() else Color("ffe09a"))
+	var duration := Balance.NIGHT_LENGTH if clock.is_night() else Balance.DAY_LENGTH
+	_clock_face.cycle = (0.5 if clock.is_night() else 0.0) + clampf(clock.time / duration, 0.0, 1.0) * 0.5
+	_clock_face.night = clock.is_night()
+	_clock_face.tooltip_text = "다음 %s까지 %d초" % ["낮" if clock.is_night() else "밤", maxi(0, ceili(clock.time_left()))]
+	_clock_face.queue_redraw()
 	var core := _main.kingdom.core
-	_set_bar(_core_bar, core.hp, core.max_hp, "왕국 %d / %d" % [ceili(core.hp), core.max_hp])
+	_set_bar(_core_bar, core.hp, core.max_hp, "성 %d / %d" % [ceili(core.hp), core.max_hp])
 	var player := _main.player
 	var max_hp := player.max_hp()
 	if player.is_dead:
 		_set_bar(_hp_bar, 0, max_hp, "부활까지 %d초" % ceili(player.respawn_time_left()))
 	else:
-		_set_bar(_hp_bar, player.hp, max_hp, "체력 %d / %d" % [ceili(player.hp), max_hp])
-	var bag := player.inventory
-	_stock_label.text = "창고\n%s\n가방 (%d/%d칸)\n%s\n경험치 %d  (K 패시브)" % [
-		_format_resources(_main.kingdom.stock), bag.used_slots(), bag.capacity(), _format_resources(bag.amounts()),
-		player.progression.xp]
-	var terrain := _main.world.data.get_terrain(_main.world.cell_at(player.global_position))
-	_info_label.text = "%s · 처치 %d" % [WorldData.TERRAIN_NAMES[terrain], _main.kills]
+		_set_bar(_hp_bar, player.hp, max_hp, "내 체력 %d / %d" % [ceili(player.hp), max_hp])
+	if _resource_drawer.visible:
+		_refresh_resources()
 
 
-## 가진 자원만 Balance.RESOURCE_NAMES 순서로, 한 줄에 RESOURCES_PER_LINE개씩. 나무·돌은 0이어도 보여준다.
-## 자동 줄바꿈은 한글 이름 중간에서 끊겨서 직접 나눈다.
-func _format_resources(amounts: Dictionary) -> String:
-	var lines := PackedStringArray()
-	var line := PackedStringArray()
-	for kind: String in Balance.RESOURCE_NAMES:
-		var amount: int = amounts.get(kind, 0)
-		if amount == 0 and kind != "wood" and kind != "stone":
-			continue
-		line.append("%s %d" % [Balance.RESOURCE_NAMES[kind], amount])
-		if line.size() == RESOURCES_PER_LINE:
-			lines.append("   ".join(line))
-			line.clear()
-	if not line.is_empty():
-		lines.append("   ".join(line))
-	return "\n".join(lines)
+## 재화 버튼 위에서 누른 좌클릭이 폴링 기반 기본 공격으로도 처리되지 않게 한다.
+func is_pointer_over_status() -> bool:
+	return _status_panel.get_global_rect().has_point(_status_panel.get_global_mouse_position()) or _action_bar.is_pointer_over_bar()
+
+
+func _refresh_resources() -> void:
+	var bag := _main.player.inventory
+	_bag_label.text = "내 가방  %d / %d칸" % [bag.used_slots(), bag.capacity()]
+	var sources: Dictionary = {"bag": bag.amounts(), "stock": _main.kingdom.stock}
+	for source: String in sources:
+		var amounts: Dictionary = sources[source]
+		for kind: String in MATERIAL_ORDER:
+			var label: Label = _resource_counts[source][kind]
+			var amount: int = amounts.get(kind, 0)
+			label.text = str(amount)
+			label.get_parent().modulate.a = 1.0 if amount > 0 else 0.4
+
+
+func _toggle_resources(open: bool) -> void:
+	Events.ui_sound_requested.emit("click")
+	_resource_drawer.visible = open
+	_resource_toggle.text = "재화  ▴" if open else "재화  ▾"
+	_resource_toggle.tooltip_text = "재화 접기" if open else "가방·창고 재화 펼치기"
+	if open:
+		_refresh_resources()
+	# Container는 접은 자식의 이전 높이를 유지하므로 최소 크기로 되돌린다.
+	_status_panel.reset_size()
 
 
 func _build_status_panel() -> void:
-	var panel := PanelContainer.new()
-	panel.add_theme_stylebox_override("panel", UiKit.box_style(Color(0.06, 0.07, 0.07, 0.8), 10))
-	panel.position = Vector2(MARGIN, MARGIN)
-	add_child(panel)
+	_status_panel = PanelContainer.new()
+	_status_panel.add_theme_stylebox_override("panel", UiKit.box_style(Color(0.055, 0.075, 0.105, 0.94), 12))
+	_status_panel.position = Vector2(MARGIN, MARGIN)
+	_status_panel.custom_minimum_size.x = STATUS_WIDTH
+	add_child(_status_panel)
 	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 6)
-	panel.add_child(box)
-	_day_label = UiKit.heading("", 16)
-	box.add_child(_day_label)
+	box.add_theme_constant_override("separation", 8)
+	_status_panel.add_child(box)
+	var header := HBoxContainer.new()
+	header.add_theme_constant_override("separation", 14)
+	box.add_child(header)
+	_clock_face = ClockFace.new()
+	header.add_child(_clock_face)
+	var time_box := VBoxContainer.new()
+	time_box.alignment = BoxContainer.ALIGNMENT_CENTER
+	header.add_child(time_box)
+	_day_label = UiKit.heading("", 22)
+	time_box.add_child(_day_label)
+	_phase_label = UiKit.heading("", 13)
+	time_box.add_child(_phase_label)
 	_core_bar = _make_bar(HealthBarArt.Tone.GOLD)
 	box.add_child(_core_bar)
 	_hp_bar = _make_bar(HealthBarArt.Tone.RED)
 	box.add_child(_hp_bar)
-	_stock_label = UiKit.heading("", 14)
-	box.add_child(_stock_label)
-	_info_label = UiKit.note("")
-	box.add_child(_info_label)
+	_resource_toggle = Button.new()
+	_resource_toggle.focus_mode = Control.FOCUS_NONE
+	_resource_toggle.toggle_mode = true
+	_resource_toggle.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_resource_toggle.add_theme_font_size_override("font_size", 13)
+	_resource_toggle.add_theme_color_override("font_color", UiKit.TEXT)
+	_resource_toggle.add_theme_stylebox_override("normal", UiKit.box_style(Color("202d3a"), 5))
+	_resource_toggle.add_theme_stylebox_override("pressed", UiKit.box_style(Color("304151"), 5))
+	box.add_child(_resource_toggle)
+	_resource_drawer = VBoxContainer.new()
+	_resource_drawer.add_theme_constant_override("separation", 8)
+	box.add_child(_resource_drawer)
+	_bag_label = UiKit.heading("내 가방", 13)
+	_resource_drawer.add_child(_bag_label)
+	_build_resource_grid("bag")
+	_resource_drawer.add_child(UiKit.heading("공용 창고", 13))
+	_build_resource_grid("stock")
+	_resource_toggle.toggled.connect(_toggle_resources)
+	_toggle_resources(false)
+
+
+func _build_resource_grid(source: String) -> void:
+	var grid := GridContainer.new()
+	grid.columns = RESOURCE_COLUMNS
+	grid.add_theme_constant_override("h_separation", 6)
+	grid.add_theme_constant_override("v_separation", 4)
+	_resource_drawer.add_child(grid)
+	_resource_counts[source] = {}
+	for kind: String in MATERIAL_ORDER:
+		var cell := HBoxContainer.new()
+		cell.custom_minimum_size = Vector2(80, 28)
+		cell.tooltip_text = Balance.RESOURCE_NAMES[kind]
+		grid.add_child(cell)
+		var icon := TextureRect.new()
+		var atlas := AtlasTexture.new()
+		atlas.atlas = MATERIAL_TEXTURE
+		atlas.region = Rect2(MATERIAL_ORDER.find(kind) * RESOURCE_ICON_SIZE, 0, RESOURCE_ICON_SIZE, RESOURCE_ICON_SIZE)
+		icon.texture = atlas
+		icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		icon.custom_minimum_size = Vector2(RESOURCE_ICON_SIZE, RESOURCE_ICON_SIZE)
+		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		cell.add_child(icon)
+		var count := UiKit.heading("0", 13)
+		count.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		cell.add_child(count)
+		_resource_counts[source][kind] = count
 
 
 func _build_minimap() -> void:
@@ -169,7 +281,8 @@ func _build_messages() -> void:
 
 
 func _build_action_bar() -> void:
-	var bar := ActionBar.new()
+	_action_bar = ActionBar.new()
+	var bar := _action_bar
 	bar.setup(_main.player, _main.build_mode, _main.kingdom)
 	bar.anchor_left = 0.5
 	bar.anchor_right = 0.5
@@ -177,7 +290,7 @@ func _build_action_bar() -> void:
 	bar.anchor_bottom = 1.0
 	bar.offset_left = -260
 	bar.offset_right = 260
-	bar.offset_top = -100
+	bar.offset_top = -40 - ActionBar.DOCK_HEIGHT
 	bar.offset_bottom = -40
 	add_child(bar)
 
