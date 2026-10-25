@@ -20,12 +20,13 @@ var lifetime := 1.0
 var radius := 4.0
 var pierce := false
 var explode_radius := 0.0
+var harvest_radius := 0.0  # 광역 채집 패시브 (플레이어 탄만)
 var color := Color("fff4c0")
 var _already_hit := {}
 var _query := PhysicsShapeQueryParameters2D.new()
 
 
-## params: direction(필수), speed, damage, lifetime, radius, pierce, explode_radius, color, team
+## params: direction(필수), speed, damage, lifetime, radius, pierce, explode_radius, harvest_radius, color, team
 static func spawn(tree: SceneTree, at: Vector2, params: Dictionary) -> Projectile:
 	var projectile := Projectile.new()
 	projectile.team = params.get("team", Team.PLAYER)
@@ -35,6 +36,7 @@ static func spawn(tree: SceneTree, at: Vector2, params: Dictionary) -> Projectil
 	projectile.radius = params.get("radius", 4.0)
 	projectile.pierce = params.get("pierce", false)
 	projectile.explode_radius = params.get("explode_radius", 0.0)
+	projectile.harvest_radius = params.get("harvest_radius", 0.0)
 	projectile.color = params.get("color", projectile.color)
 	projectile.position = at
 	# 물리 콜백 도중에 불려도 안전하도록 다음 틈에 추가
@@ -78,14 +80,18 @@ func _on_hit(body: Object) -> void:
 	if body is TileMapLayer:
 		var world := (body as TileMapLayer).get_parent() as World
 		var cell := world.object_cell_near(global_position, radius)
-		if cell != World.NO_CELL:
+		if cell != World.NO_CELL and harvest_radius > 0.0:
+			world.damage_objects_around(cell, damage, harvest_radius)
+		elif cell != World.NO_CELL:
 			world.damage_object(cell, damage, team != Team.ENEMY)
 		queue_free()
 		return
 	if _already_hit.has(body):
 		return
 	_already_hit[body] = true
-	if body.has_method("take_damage"):
+	if body is Enemy:
+		(body as Enemy).take_damage(damage, team == Team.TOWER)
+	elif body.has_method("take_damage"):
 		body.take_damage(damage)
 	Fx.burst(get_tree(), global_position, color, 3, 80.0)
 	if not pierce:

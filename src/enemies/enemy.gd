@@ -9,6 +9,7 @@ var hp := 1.0
 var max_hp := 1.0
 var radius := 10.0
 var is_invader := false
+var killed_by_tower := false
 
 var _player: Player
 var _core: Core
@@ -77,13 +78,15 @@ func _physics_process(delta: float) -> void:
 	queue_redraw()
 
 
-func take_damage(amount: float) -> void:
+## by_tower: 화살탑 탄. 마지막 일격이 탑이면 처치 경험치를 모든 플레이어가 나눠 받는다 (D-015)
+func take_damage(amount: float, by_tower := false) -> void:
 	if _dying:
 		return
 	hp -= amount
 	_flash = 0.08
 	if hp <= 0.0:
 		_dying = true
+		killed_by_tower = by_tower
 		Fx.burst(get_tree(), global_position, stats["color"], 12)
 		Events.enemy_killed.emit(self)
 		queue_free()
@@ -157,5 +160,5 @@ func _draw() -> void:
 	draw_rect(Rect2(-radius * 0.4 - 2.0, eye_y, 3, 3), Color("111111"))
 	draw_rect(Rect2(radius * 0.4 - 1.0, eye_y, 3, 3), Color("111111"))
 	if hp < max_hp:
-		draw_rect(Rect2(-radius, -radius - 6.0, radius * 2.0, 3), Color(0, 0, 0, 0.6))
-		draw_rect(Rect2(-radius, -radius - 6.0, radius * 2.0 * hp / max_hp, 3), Palette.ENEMY_MARK)
+		var width := maxi(HealthBarArt.WIDTH, roundi(radius * 2.0 + 8.0))
+		HealthBarArt.draw_bar(self, Vector2(-width / 2.0, -radius - 12.0), hp / max_hp, HealthBarArt.Tone.RED, width)

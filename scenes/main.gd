@@ -30,6 +30,8 @@ func _ready() -> void:
 
 	Events.resources_gained.connect(_on_resources_gained)
 	Events.chest_opened.connect(_on_chest_opened)
+	Events.object_harvested.connect(_on_object_harvested)
+	Events.item_crafted.connect(_on_item_crafted)
 	Events.enemy_killed.connect(_on_enemy_killed)
 	Events.core_destroyed.connect(_on_core_destroyed)
 
@@ -47,7 +49,7 @@ func _physics_process(_delta: float) -> void:
 
 func _process(_delta: float) -> void:
 	player.attack_enabled = not (build_mode.active or hud.build_menu.visible or hud.equipment_panel.visible
-		or hud.storage_panel.visible or hud.crafting_panel.visible)
+		or hud.storage_panel.visible or hud.crafting_panel.visible or hud.passive_panel.visible)
 	player.skills_enabled = not build_mode.active
 
 
@@ -56,6 +58,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_toggle_build_menu()
 	elif event.is_action_pressed("equipment"):
 		hud.equipment_panel.toggle()
+	elif event.is_action_pressed("passives"):
+		hud.passive_panel.toggle()
 	elif event.is_action_pressed("meeting"):
 		_close_overlays()
 		hud.meeting_panel.open()
@@ -82,6 +86,7 @@ func _close_overlays() -> void:
 	hud.equipment_panel.hide()
 	hud.storage_panel.hide()
 	hud.crafting_panel.hide()
+	hud.passive_panel.hide()
 	hud.close_big_map()
 
 
@@ -132,24 +137,55 @@ func _on_resources_gained(amounts: Dictionary, at: Vector2) -> void:
 
 
 func _on_chest_opened(at: Vector2) -> void:
-	var reward := Loot.roll_chest(player.equipment)
+	var reward := Loot.roll_chest(world.data.get_terrain(world.cell_at(at)))
+	Events.resources_gained.emit(reward["resources"], at)
 	if reward.has("item"):
 		var item_name: String = ItemDB.ITEMS[reward["item"]]["name"]
 		player.equipment.add_to_bag(reward["item"])
 		Events.message.emit("상자에서 %s 획득! (I로 장착)" % item_name)
-		Fx.float_text(get_tree(), at, item_name, Palette.OBJECTS[WorldData.Obj.CHEST])
-	else:
-		Events.resources_gained.emit(reward["resources"], at)
+		Fx.float_text(get_tree(), at + Vector2(0, -18), item_name, Palette.OBJECTS[WorldData.Obj.CHEST])
 
 
 func _on_enemy_killed(enemy: Node) -> void:
 	kills += 1
 	var killed := enemy as Enemy
 	if killed.stats.get("is_boss", false):
-		Events.resources_gained.emit({"gold": Balance.BOSS_GOLD}, killed.global_position)
 		Events.message.emit("보스 처치!")
-	elif randf() < Balance.KILL_GOLD_CHANCE:
-		Events.resources_gained.emit({"gold": 1}, killed.global_position)
+	var xp: int = killed.stats.get("xp", 0)
+	if killed.killed_by_tower:
+		var players := get_tree().get_nodes_in_group("player")
+		for each: Player in players:
+			_give_xp(each, Balance.tower_xp_share(xp, players.size()), killed.global_position)
+	else:
+		_give_xp(player, xp, killed.global_position)
+	if not killed.is_invader:
+		var drop := EnemyDB.roll_drop(killed.type_id, player.progression.value("scavenger") / 100.0)
+		if not drop.is_empty():
+			Events.resources_gained.emit(drop, killed.global_position + Vector2(0, -16))
+
+
+## 풍요로운 손: 부순 오브젝트의 재료를 더 준다
+func _on_object_harvested(object_id: int, cell: Vector2i) -> void:
+	var at := world.cell_center(cell)
+	_give_xp(player, Balance.XP_HARVEST_BY_TIER[world.data.tier_at(cell)], at)
+	var extra := int(player.progression.value("bountiful"))
+	if extra > 0:
+		var bonus := {}
+		for kind: String in WorldData.OBJECT_DROPS[object_id]:
+			bonus[kind] = extra
+		Events.resources_gained.emit(bonus, at + Vector2(0, -16))
+
+
+func _on_item_crafted(recipe_id: String) -> void:
+	_give_xp(player, Balance.XP_CRAFT_BY_TIER[RecipeDB.RECIPES[recipe_id]["tier"]], player.global_position)
+
+
+## 멀티플레이에서는 처치·채집·제작한 플레이어를 신호에 실어 그 사람에게 준다. 지금은 로컬 플레이어
+func _give_xp(receiver: Player, amount: int, at: Vector2) -> void:
+	if amount <= 0 or receiver.is_dead:
+		return
+	receiver.progression.add_xp(amount)
+	Fx.float_text(get_tree(), at + Vector2(0, -28), "경험치 +%d" % amount, Color("b48cff"))
 
 
 func _on_core_destroyed() -> void:

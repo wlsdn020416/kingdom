@@ -17,6 +17,7 @@ const KEYS := {
 	"repair": [KEY_R],
 	"build_toggle": [KEY_B],
 	"equipment": [KEY_I],
+	"passives": [KEY_K],
 	"meeting": [KEY_T],
 	"world_map": [KEY_M],
 	"skip_night": [KEY_N],

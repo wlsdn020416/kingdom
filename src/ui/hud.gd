@@ -2,16 +2,18 @@ class_name Hud
 extends CanvasLayer
 ## 화면 UI. 게임 상태를 매 프레임 읽어서 보여주기만 하고, 상태를 바꾸지 않는다.
 
-const HINT := "B 건설 · I 장비 · E 상자·장비 상자·제작대 · R 수리 · T 전략회의 · M 지도 · N 밤으로 넘기기"
+const HINT := "B 건설 · I 장비 · K 패시브 · E 상자·장비 상자·제작대 · R 수리 · T 전략회의 · M 지도 · N 밤으로 넘기기"
 const MESSAGE_LIMIT := 4
 const MESSAGE_TIME := 4.0
 const MARGIN := 16.0
 const MINIMAP_SIZE := 180.0
+const RESOURCES_PER_LINE := 3
 
 var equipment_panel: EquipmentPanel
 var storage_panel: StoragePanel
 var build_menu: BuildMenu
 var crafting_panel: CraftingPanel
+var passive_panel: PassivePanel
 var meeting_panel: MeetingPanel
 var game_over_panel: GameOverPanel
 
@@ -48,6 +50,9 @@ func setup(main: Main) -> void:
 	crafting_panel = CraftingPanel.new()
 	add_child(crafting_panel)
 	crafting_panel.setup(main.kingdom, main.player)
+	passive_panel = PassivePanel.new()
+	add_child(passive_panel)
+	passive_panel.setup(main.player.progression)
 	meeting_panel = MeetingPanel.new()
 	add_child(meeting_panel)
 	meeting_panel.setup(main.map_state)
@@ -90,18 +95,35 @@ func _process(_delta: float) -> void:
 	var core := _main.kingdom.core
 	_set_bar(_core_bar, core.hp, core.max_hp, "왕국 %d / %d" % [ceili(core.hp), core.max_hp])
 	var player := _main.player
-	var max_hp := player.equipment.max_hp()
+	var max_hp := player.max_hp()
 	if player.is_dead:
 		_set_bar(_hp_bar, 0, max_hp, "부활까지 %d초" % ceili(player.respawn_time_left()))
 	else:
 		_set_bar(_hp_bar, player.hp, max_hp, "체력 %d / %d" % [ceili(player.hp), max_hp])
-	var stock := _main.kingdom.stock
 	var bag := player.inventory
-	_stock_label.text = "창고  나무 %d   돌 %d   금 %d\n가방  나무 %d   돌 %d   금 %d   (%d/%d칸)" % [
-		stock["wood"], stock["stone"], stock["gold"],
-		bag.count("wood"), bag.count("stone"), bag.count("gold"), bag.used_slots(), Balance.INVENTORY_SLOTS]
+	_stock_label.text = "창고\n%s\n가방 (%d/%d칸)\n%s\n경험치 %d  (K 패시브)" % [
+		_format_resources(_main.kingdom.stock), bag.used_slots(), bag.capacity(), _format_resources(bag.amounts()),
+		player.progression.xp]
 	var terrain := _main.world.data.get_terrain(_main.world.cell_at(player.global_position))
 	_info_label.text = "%s · 처치 %d" % [WorldData.TERRAIN_NAMES[terrain], _main.kills]
+
+
+## 가진 자원만 Balance.RESOURCE_NAMES 순서로, 한 줄에 RESOURCES_PER_LINE개씩. 나무·돌은 0이어도 보여준다.
+## 자동 줄바꿈은 한글 이름 중간에서 끊겨서 직접 나눈다.
+func _format_resources(amounts: Dictionary) -> String:
+	var lines := PackedStringArray()
+	var line := PackedStringArray()
+	for kind: String in Balance.RESOURCE_NAMES:
+		var amount: int = amounts.get(kind, 0)
+		if amount == 0 and kind != "wood" and kind != "stone":
+			continue
+		line.append("%s %d" % [Balance.RESOURCE_NAMES[kind], amount])
+		if line.size() == RESOURCES_PER_LINE:
+			lines.append("   ".join(line))
+			line.clear()
+	if not line.is_empty():
+		lines.append("   ".join(line))
+	return "\n".join(lines)
 
 
 func _build_status_panel() -> void:
@@ -114,9 +136,9 @@ func _build_status_panel() -> void:
 	panel.add_child(box)
 	_day_label = UiKit.heading("", 16)
 	box.add_child(_day_label)
-	_core_bar = _make_bar(Color("c9873a"))
+	_core_bar = _make_bar(HealthBarArt.Tone.GOLD)
 	box.add_child(_core_bar)
-	_hp_bar = _make_bar(Color("c0453a"))
+	_hp_bar = _make_bar(HealthBarArt.Tone.RED)
 	box.add_child(_hp_bar)
 	_stock_label = UiKit.heading("", 14)
 	box.add_child(_stock_label)
@@ -174,22 +196,20 @@ func _build_hint() -> void:
 	add_child(hint)
 
 
-func _make_bar(fill_color: Color) -> ProgressBar:
+func _make_bar(tone: HealthBarArt.Tone) -> ProgressBar:
 	var bar := ProgressBar.new()
 	bar.custom_minimum_size = Vector2(240, 18)
 	bar.show_percentage = false
-	var fill := StyleBoxFlat.new()
-	fill.bg_color = fill_color
-	var background := StyleBoxFlat.new()
-	background.bg_color = Color(0, 0, 0, 0.6)
-	bar.add_theme_stylebox_override("fill", fill)
-	bar.add_theme_stylebox_override("background", background)
+	bar.add_theme_stylebox_override("fill", HealthBarArt.fill_style(tone))
+	bar.add_theme_stylebox_override("background", HealthBarArt.background_style())
 	var label := Label.new()
 	label.name = "Text"
 	label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	label.add_theme_font_size_override("font_size", 12)
+	label.add_theme_color_override("font_outline_color", Color("151e2b"))
+	label.add_theme_constant_override("outline_size", 2)
 	bar.add_child(label)
 	return bar
 

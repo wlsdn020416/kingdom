@@ -6,7 +6,7 @@ extends RefCounted
 const KNOCKBACK := 260.0
 
 
-## weapon: ItemDB의 weapon 항목 (damage, range, arc)
+## weapon: ItemDB의 weapon 항목 (damage, range, arc). "harvest_radius"가 있으면 광역 채집 (D-015)
 static func swing(tree: SceneTree, origin: Vector2, direction: Vector2, weapon: Dictionary) -> void:
 	var reach: float = weapon["range"]
 	var half_arc := deg_to_rad(weapon["arc"]) / 2.0
@@ -22,4 +22,4 @@ static func swing(tree: SceneTree, origin: Vector2, direction: Vector2, weapon: 
 	var world := tree.get_first_node_in_group("world") as World
 	var cell := world.object_cell_near(origin + direction * reach * 0.6, reach * 0.5)
 	if cell != World.NO_CELL:
-		world.damage_object(cell, weapon["damage"], true)
+		world.damage_objects_around(cell, weapon["damage"], weapon.get("harvest_radius", 0.0))

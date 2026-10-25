@@ -11,11 +11,17 @@ const SWING_SHOW_TIME := 0.12  # 근거리 공격 궤적이 보이는 시간
 const SPRITE_SHEET := preload("res://assets/characters/player.png")
 const SPRITE_FRAMES_PER_DIR := 4
 const WALK_FPS := 8.0
+const SWORD_TEXTURE := preload("res://assets/combat/rusty_sword.png")
+const SLASH_TEXTURE := preload("res://assets/combat/sword_slash.png")
+const SLASH_FRAME_SIZE := 112
+const SLASH_FRAMES := 4
+const SWORD_OFFSET := Vector2(6, -8)
 
 @onready var camera: Camera2D = $Camera
 
 var equipment := Equipment.new()
 var inventory := Inventory.new()
+var progression := Progression.new()
 var hp := 0.0
 var aim_direction := Vector2.RIGHT
 var is_dead := false
@@ -31,6 +37,8 @@ var _dash_time := 0.0
 var _dash_velocity := Vector2.ZERO
 var _dash_cooldown := 0.0
 var _swing_time := 0.0
+var _swing_direction := Vector2.RIGHT
+var _swing_item := ""
 var _respawn_time := 0.0
 var _shake := 0.0
 var _sprite := Sprite2D.new()
@@ -38,13 +46,14 @@ var _walk_time := 0.0
 
 
 func _ready() -> void:
-	hp = equipment.max_hp()
+	hp = max_hp()
 	_sprite.texture = SPRITE_SHEET
 	_sprite.hframes = SPRITE_FRAMES_PER_DIR * 3
 	# 발이 충돌 원 중심보다 조금 아래에 오도록 올린다
 	_sprite.position = Vector2(0, -4)
 	add_child(_sprite)
-	equipment.changed.connect(func() -> void: hp = minf(hp, equipment.max_hp()))
+	equipment.changed.connect(func() -> void: hp = minf(hp, max_hp()))
+	progression.changed.connect(func() -> void: inventory.bonus_slots = int(progression.value("deep_pockets")))
 	Fx.add_light(self, LIGHT_RADIUS)
 
 
@@ -71,7 +80,7 @@ func _physics_process(delta: float) -> void:
 		_dash_time -= delta
 		velocity = _dash_velocity
 	else:
-		velocity = _move_input() * equipment.move_speed()
+		velocity = _move_input() * equipment.move_speed() * (1.0 + progression.value("swift") / 100.0)
 	move_and_slide()
 
 	var to_mouse := get_global_mouse_position() - global_position
@@ -112,7 +121,12 @@ func use_skill(slot: int) -> void:
 	equipment.start_cooldown(bar[slot])
 
 
+func max_hp() -> float:
+	return equipment.max_hp() + progression.value("vitality")
+
+
 func fire(params: Dictionary) -> void:
+	params["harvest_radius"] = progression.value("wide_harvest")
 	var direction: Vector2 = params["direction"]
 	Projectile.spawn(get_tree(), global_position + direction * 14.0, params)
 
@@ -133,7 +147,7 @@ func dash_cooldown_left() -> float:
 
 
 func heal(amount: float) -> void:
-	hp = minf(equipment.max_hp(), hp + amount)
+	hp = minf(max_hp(), hp + amount)
 	Fx.float_text(get_tree(), global_position, "+%d" % amount, Color("6fcf6f"))
 
 
@@ -156,18 +170,19 @@ func _die() -> void:
 	is_dead = true
 	inventory.clear()
 	equipment.lose_bag()
+	progression.lose_unspent()
 	_respawn_time = Balance.RESPAWN_TIME
 	collision_layer = 0
 	Fx.burst(get_tree(), global_position, Color("ff7060"), 20)
 	_sprite.visible = false
 	Events.player_died.emit()
-	Events.message.emit("쓰러졌습니다. 들고 있던 자원과 가방 장비를 모두 잃었습니다. %d초 뒤 왕국에서 부활합니다" % Balance.RESPAWN_TIME)
+	Events.message.emit("쓰러졌습니다. 들고 있던 자원, 가방 장비, 쓰지 않은 경험치를 모두 잃었습니다. %d초 뒤 왕국에서 부활합니다" % Balance.RESPAWN_TIME)
 	queue_redraw()
 
 
 func _respawn() -> void:
 	is_dead = false
-	hp = equipment.max_hp()
+	hp = max_hp()
 	global_position = spawn_point
 	collision_layer = PhysicsLayers.PLAYER
 	_invuln_time = Balance.RESPAWN_INVULN
@@ -179,11 +194,15 @@ func respawn_time_left() -> float:
 
 
 func _fire_weapon() -> void:
-	var weapon := equipment.weapon()
+	var weapon := equipment.weapon().duplicate()
+	weapon["damage"] *= 1.0 + progression.value("keen_edge") / 100.0
+	weapon["harvest_radius"] = progression.value("wide_harvest")
 	_fire_cooldown = 1.0 / float(weapon["rate"])
 	if weapon.get("melee", false):
 		Melee.swing(get_tree(), global_position, aim_direction, weapon)
 		_swing_time = SWING_SHOW_TIME
+		_swing_direction = aim_direction
+		_swing_item = equipment.item_in("weapon")
 		return
 	fire({"direction": aim_direction.rotated(randf_range(-0.03, 0.03)), "damage": weapon["damage"], "speed": weapon["speed"]})
 
@@ -207,14 +226,35 @@ func _update_sprite(delta: float) -> void:
 	_sprite.visible = not (_invuln_time > 0.0 and int(Time.get_ticks_msec() / 60.0) % 2 == 0)
 
 
-## 몸은 _sprite가 그리고, 여기서는 무기 방향·공격 궤적·보호막만 그린다.
+## 몸은 _sprite가 그리고, 여기서는 무기·공격 궤적·보호막만 그린다.
 func _draw() -> void:
 	if is_dead:
 		return
-	draw_line(Vector2.ZERO, aim_direction * 20.0, Color("e8e0c8"), 3.0)
-	if _swing_time > 0.0:
-		var weapon := equipment.weapon()
-		var half_arc := deg_to_rad(weapon["arc"]) / 2.0
-		draw_arc(Vector2.ZERO, weapon["range"], aim_direction.angle() - half_arc, aim_direction.angle() + half_arc, 16, Color("f4ecd0"), 4.0)
+	var swinging := _swing_time > 0.0 and _swing_item == equipment.item_in("weapon")
+	if equipment.item_in("weapon") == "rusty_sword":
+		_draw_rusty_sword(swinging)
+	else:
+		draw_line(Vector2.ZERO, aim_direction * 20.0, Color("e8e0c8"), 3.0)
+		if swinging:
+			var weapon := equipment.weapon()
+			var half_arc := deg_to_rad(weapon["arc"]) / 2.0
+			draw_arc(Vector2.ZERO, weapon["range"], _swing_direction.angle() - half_arc, _swing_direction.angle() + half_arc, 16, Color("f4ecd0"), 4.0)
 	if _shield_time > 0.0:
 		draw_arc(Vector2.ZERO, 20.0, 0.0, TAU, 24, Skills.color("shield"), 2.0)
+
+
+## 판정은 누른 순간 끝나므로 궤적도 첫 칸부터 범위 전체를 보인다.
+## 공격 중 마우스를 돌려도 이미 판정한 방향으로 궤적을 남긴다.
+func _draw_rusty_sword(swinging: bool) -> void:
+	var angle := aim_direction.angle()
+	if swinging:
+		var progress := clampf(1.0 - _swing_time / SWING_SHOW_TIME, 0.0, 1.0)
+		var frame := mini(int(progress * SLASH_FRAMES), SLASH_FRAMES - 1)
+		var size := Vector2.ONE * SLASH_FRAME_SIZE
+		draw_set_transform(Vector2.ZERO, _swing_direction.angle())
+		draw_texture_rect_region(SLASH_TEXTURE, Rect2(-size / 2.0, size), Rect2(Vector2(frame * SLASH_FRAME_SIZE, 0), size))
+		var half_arc := deg_to_rad(float(equipment.weapon()["arc"])) / 2.0
+		angle = _swing_direction.angle() + lerpf(-half_arc, half_arc, progress)
+	draw_set_transform(Vector2.ZERO, angle)
+	draw_texture(SWORD_TEXTURE, SWORD_OFFSET)
+	draw_set_transform(Vector2.ZERO)

@@ -175,6 +175,7 @@ func craft(recipe_id: String, actor_position: Vector2, payer: Inventory, equipme
 		return "자원이 부족합니다 (%s)" % Balance.format_cost(recipe["cost"])
 	_spend(recipe["cost"], payer)
 	equipment.add_to_bag(recipe_id)
+	Events.item_crafted.emit(recipe_id)
 	return ""
 
 

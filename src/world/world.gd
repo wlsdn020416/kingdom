@@ -4,24 +4,35 @@ extends Node2D
 ## 상태는 data(WorldData)에 있고, 타일맵은 그걸 보여주기만 한다.
 
 const NO_CELL := Vector2i(-1, -1)
-const HARVESTABLE := [WorldData.Obj.TREE, WorldData.Obj.ROCK, WorldData.Obj.GOLD_ORE]
+const HARVESTABLE := [
+	WorldData.Obj.TREE, WorldData.Obj.ROCK, WorldData.Obj.HARDWOOD_TREE, WorldData.Obj.COPPER_ORE,
+	WorldData.Obj.IRON_ORE, WorldData.Obj.MOSS, WorldData.Obj.OBSIDIAN,
+]
 
 @onready var terrain_layer: TileMapLayer = $Terrain
 @onready var object_layer: TileMapLayer = $Objects
 
+const HP_BAR_TIME := 4.0  # 마지막으로 맞은 뒤 채집물 체력 바가 보이는 시간(초)
+
 var data: WorldData
 var _last_reveal_center := NO_CELL
+var _hp_bar_time := {}  # Vector2i -> 남은 표시 시간
+## 오브젝트 타일보다 위에 그려야 해서 별도 노드에 그린다 (World 자신의 _draw는 자식 타일맵 아래에 깔린다)
+var _hp_overlay := Node2D.new()
 
 
 func setup(world_data: WorldData) -> void:
 	data = world_data
+	_hp_overlay.z_index = 1
+	_hp_overlay.draw.connect(_draw_hp_bars)
+	add_child(_hp_overlay)
 	var tile_set := TilesetBuilder.build()
 	terrain_layer.tile_set = tile_set
 	object_layer.tile_set = tile_set
 	for y in data.size.y:
 		for x in data.size.x:
 			var cell := Vector2i(x, y)
-			terrain_layer.set_cell(cell, TilesetBuilder.TERRAIN_SOURCE, Vector2i(data.get_terrain(cell), 0))
+			terrain_layer.set_cell(cell, TilesetBuilder.TERRAIN_SOURCE, TilesetBuilder.terrain_coords(data.get_terrain(cell), cell))
 			var obj := data.get_object(cell)
 			if obj != WorldData.Obj.NONE:
 				object_layer.set_cell(cell, TilesetBuilder.OBJECT_SOURCE, Vector2i(obj, 0))
@@ -51,6 +62,8 @@ func damage_object(cell: Vector2i, amount: float, by_player: bool) -> void:
 	var i := data.index(cell)
 	data.object_hp[i] -= amount
 	if data.object_hp[i] > 0.0:
+		_hp_bar_time[cell] = HP_BAR_TIME
+		_hp_overlay.queue_redraw()
 		return
 	if by_player and WorldData.OBJECT_DROPS.has(obj):
 		var drops := {}
@@ -58,8 +71,20 @@ func damage_object(cell: Vector2i, amount: float, by_player: bool) -> void:
 		for kind in base:
 			drops[kind] = base[kind] + randi_range(0, 1)
 		Events.resources_gained.emit(drops, cell_center(cell))
+		Events.object_harvested.emit(obj, cell)
 	Fx.burst(get_tree(), cell_center(cell), Palette.OBJECTS[obj])
 	_remove_object(cell)
+
+
+## 광역 채집 패시브: cell과 그 주변 radius칸 안의 나무·바위·광석에 같은 피해 (상자는 제외)
+func damage_objects_around(cell: Vector2i, amount: float, radius: float) -> void:
+	var reach := ceili(radius)
+	for y in range(-reach, reach + 1):
+		for x in range(-reach, reach + 1):
+			var offset := Vector2i(x, y)
+			var target := cell + offset
+			if offset == Vector2i.ZERO or (Vector2(offset).length() <= radius and data.get_object(target) in HARVESTABLE):
+				damage_object(target, amount, true)
 
 
 func open_chest(cell: Vector2i) -> void:
@@ -124,6 +149,31 @@ func reveal(at: Vector2) -> void:
 
 
 func _remove_object(cell: Vector2i) -> void:
+	_hp_bar_time.erase(cell)
+	_hp_overlay.queue_redraw()
 	data.set_object(cell, WorldData.Obj.NONE)
 	object_layer.erase_cell(cell)
 	Events.map_cells_changed.emit([cell])
+
+
+func _process(delta: float) -> void:
+	if _hp_bar_time.is_empty():
+		return
+	for cell: Vector2i in _hp_bar_time.keys():
+		_hp_bar_time[cell] -= delta
+		if _hp_bar_time[cell] <= 0.0:
+			_hp_bar_time.erase(cell)
+	_hp_overlay.queue_redraw()
+
+
+## 나무 수관이 바를 가리지 않도록 나무만 높여 그린다. 표시 시간은 기존대로 유지한다.
+func _draw_hp_bars() -> void:
+	for cell: Vector2i in _hp_bar_time:
+		var obj := data.get_object(cell)
+		var max_hp: float = WorldData.OBJECT_HP.get(obj, 0.0)
+		if max_hp <= 0.0:
+			continue
+		var hp := data.object_hp[data.index(cell)]
+		var bar_y := -40.0 if obj in [WorldData.Obj.TREE, WorldData.Obj.HARDWOOD_TREE] else -24.0
+		var top_left := _hp_overlay.to_local(cell_center(cell)) + Vector2(-HealthBarArt.WIDTH / 2.0, bar_y)
+		HealthBarArt.draw_bar(_hp_overlay, top_left, hp / max_hp, HealthBarArt.Tone.GOLD)
