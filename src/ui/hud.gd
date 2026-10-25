@@ -40,7 +40,7 @@ func setup(main: Main) -> void:
 	add_child(_big_map)
 	equipment_panel = EquipmentPanel.new()
 	add_child(equipment_panel)
-	equipment_panel.setup(main.player.equipment)
+	equipment_panel.setup(main.player.equipment, main.player.inventory)
 	storage_panel = StoragePanel.new()
 	add_child(storage_panel)
 	storage_panel.setup(main.kingdom, main.player)
