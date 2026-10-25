@@ -26,14 +26,14 @@ static func cast(skill: Dictionary, player: Player) -> void:
 			for i in count:
 				var angle := (float(i) / (count - 1) - 0.5) * 0.7
 				player.fire({"direction": player.aim_direction.rotated(angle), "damage": skill["damage"],
-					"speed": 560.0, "lifetime": 0.45, "color": color(id)})
+					"speed": 560.0, "lifetime": 0.45, "color": color(id), "art": "bolt"})
 		"fireball":
 			player.fire({"direction": player.aim_direction, "damage": skill["damage"], "speed": 480.0,
-				"lifetime": 1.4, "radius": 9.0, "pierce": true, "color": color(id)})
+				"lifetime": 1.4, "radius": 9.0, "pierce": true, "color": color(id), "art": "fireball"})
 		"bomb":
 			var distance := minf(player.global_position.distance_to(player.get_global_mouse_position()), BOMB_MAX_RANGE)
 			player.fire({"direction": player.aim_direction, "damage": skill["damage"], "speed": 420.0,
-				"lifetime": distance / 420.0, "radius": 6.0, "explode_radius": skill["radius"], "color": color(id)})
+				"lifetime": distance / 420.0, "radius": 6.0, "explode_radius": skill["radius"], "color": color(id), "art": "bomb"})
 		"rally":
 			player.blast(skill["radius"], skill["damage"])
 			Fx.burst(player.get_tree(), player.global_position, color(id), 30, 300.0)

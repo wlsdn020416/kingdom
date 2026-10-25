@@ -6,21 +6,18 @@ extends CharacterBody2D
 ## 적에게 닿는 공격을 할 때마다 알린다. 멀티플레이 참가자는 이걸 호스트에 보내 호스트의 적에게 다시 실행한다 (D-017).
 ## kind: "projectile"(Projectile 인자), "swing"(origin, direction, weapon), "blast"(origin, radius, damage)
 signal attacked(kind: String, data: Dictionary)
+## 이 캐릭터가 실제로 한 행동의 연출음. 판정·게임용 난수와 무관하며 다른 사람에게도 공유한다.
+signal sound_requested(id: String, at: Vector2)
+## 순수 공격 연출. PlayerSync가 다른 사람에게 같은 모션을 보여준다.
+signal attack_visual_requested(id: String, direction: Vector2)
 
 const DASH_SPEED := 950.0
 const DASH_TIME := 0.18
 const LIGHT_RADIUS := 230.0
-const SWING_SHOW_TIME := 0.12  # 근거리 공격 궤적이 보이는 시간
 ## 가로 한 줄 시트: 정면 4칸, 뒷면 4칸, 오른쪽 측면 4칸(왼쪽은 좌우 반전). 각 방향 0·2번 칸이 서 있는 자세.
 const SPRITE_SHEET := preload("res://assets/characters/player.png")
 const SPRITE_FRAMES_PER_DIR := 4
 const WALK_FPS := 8.0
-const SWORD_TEXTURE := preload("res://assets/combat/rusty_sword.png")
-const SLASH_TEXTURE := preload("res://assets/combat/sword_slash.png")
-const SLASH_FRAME_SIZE := 112
-const SLASH_FRAMES := 4
-const SWORD_OFFSET := Vector2(6, -8)
-
 @onready var camera: Camera2D = $Camera
 
 var equipment := Equipment.new()
@@ -33,6 +30,8 @@ var spawn_point := Vector2.ZERO
 ## 건설 모드나 장비창이 열려 있으면 Main이 끈다
 var attack_enabled := true
 var skills_enabled := true
+## 멀티플레이 참가자는 Main이 끈다. 나무·바위·상자는 호스트가 attacked를 다시 실행해서 바꾼다 (D-017 3단계)
+var hits_world := true
 
 var _fire_cooldown := 0.0
 var _invuln_time := 0.0
@@ -40,13 +39,14 @@ var _shield_time := 0.0
 var _dash_time := 0.0
 var _dash_velocity := Vector2.ZERO
 var _dash_cooldown := 0.0
-var _swing_time := 0.0
-var _swing_direction := Vector2.RIGHT
-var _swing_item := ""
+var _combo_count := 0  # 마무리 일격 패시브: 지난 2배 피해 뒤 기본 공격 횟수
+var _since_hit := 0.0  # 재생 패시브: 마지막으로 맞은 뒤 지난 시간
+var _last_stand_cooldown := 0.0
 var _respawn_time := 0.0
 var _shake := 0.0
 var _sprite := Sprite2D.new()
 var _walk_time := 0.0
+var weapon_visual := WeaponVisual.new()
 
 
 func _ready() -> void:
@@ -55,6 +55,8 @@ func _ready() -> void:
 	_sprite.hframes = SPRITE_FRAMES_PER_DIR * 3
 	# 발이 충돌 원 중심보다 조금 아래에 오도록 올린다
 	_sprite.position = Vector2(0, -4)
+	add_child(weapon_visual)
+	weapon_visual.setup(_sprite)
 	add_child(_sprite)
 	equipment.changed.connect(func() -> void: hp = minf(hp, max_hp()))
 	progression.changed.connect(func() -> void: inventory.bonus_slots = int(progression.value("deep_pockets")))
@@ -79,7 +81,8 @@ func _physics_process(delta: float) -> void:
 	_shield_time -= delta
 	_fire_cooldown -= delta
 	_dash_cooldown -= delta
-	_swing_time -= delta
+	_last_stand_cooldown -= delta
+	_regenerate(delta)
 	if _dash_time > 0.0:
 		_dash_time -= delta
 		velocity = _dash_velocity
@@ -91,6 +94,8 @@ func _physics_process(delta: float) -> void:
 	if to_mouse.length() > 1.0:
 		aim_direction = to_mouse.normalized()
 	_update_sprite(delta)
+	weapon_visual.set_weapon(equipment.item_in("weapon"))
+	weapon_visual.aim_direction = aim_direction
 	if attack_enabled and Input.is_action_pressed("attack") and _fire_cooldown <= 0.0:
 		_fire_weapon()
 	queue_redraw()
@@ -120,9 +125,19 @@ func _unhandled_input(event: InputEvent) -> void:
 func use_skill(slot: int) -> void:
 	var bar := equipment.skill_bar()
 	if slot >= bar.size() or not equipment.is_ready(bar[slot]):
+		Events.ui_sound_requested.emit("error")
 		return
-	Skills.cast(ItemDB.ITEMS[bar[slot]]["skill"], self)
+	var skill: Dictionary = ItemDB.ITEMS[bar[slot]]["skill"].duplicate()
+	if skill.has("damage"):
+		skill["damage"] *= 1.0 + progression.value("skill_power") / 100.0
+	Skills.cast(skill, self)
 	equipment.start_cooldown(bar[slot])
+	var id: String = ItemDB.ITEMS[bar[slot]]["skill"]["id"]
+	if id in ["shotgun", "fireball", "bomb"]:
+		_show_attack(bar[slot])
+	# 폭탄은 던질 때가 아니라 실제 폭발했을 때 월드에서 울린다.
+	if id != "bomb":
+		sound_requested.emit(id, global_position)
 
 
 func max_hp() -> float:
@@ -130,7 +145,10 @@ func max_hp() -> float:
 
 
 func fire(params: Dictionary) -> void:
+	if not params.has("art"):
+		params["art"] = WeaponArtDB.BASIC_PROJECTILES.get(equipment.item_in("weapon"), "arrow")
 	params["harvest_radius"] = progression.value("wide_harvest")
+	params["hits_world"] = hits_world
 	var direction: Vector2 = params["direction"]
 	var at := global_position + direction * 14.0
 	Projectile.spawn(get_tree(), at, params)
@@ -145,13 +163,15 @@ func blast(radius: float, damage: float) -> void:
 
 func dash() -> void:
 	if _dash_cooldown > 0.0:
+		Events.ui_sound_requested.emit("error")
 		return
-	_dash_cooldown = Balance.DASH_COOLDOWN
+	_dash_cooldown = Balance.DASH_COOLDOWN * (1.0 - progression.value("windstep") / 100.0)
 	var direction := _move_input()
 	if direction == Vector2.ZERO:
 		direction = aim_direction
 	_dash_velocity = direction.normalized() * DASH_SPEED
 	_dash_time = DASH_TIME
+	sound_requested.emit("dash", global_position)
 
 
 func dash_cooldown_left() -> float:
@@ -170,25 +190,38 @@ func activate_shield(duration: float) -> void:
 func take_damage(amount: float) -> void:
 	if is_dead or _invuln_time > 0.0 or _shield_time > 0.0 or _dash_time > 0.0:
 		return
+	_since_hit = 0.0
+	var last_stand := progression.value("last_stand")
+	if hp - amount <= 0.0 and last_stand > 0.0 and _last_stand_cooldown <= 0.0:
+		# 최후의 저항: 쓰러질 피해를 한 번 버틴다
+		hp = 1.0
+		_invuln_time = PassiveDB.LAST_STAND_INVULN
+		_last_stand_cooldown = last_stand
+		Fx.float_text(get_tree(), global_position, "최후의 저항!", Color("ffd060"))
+		return
 	hp -= amount
 	_invuln_time = Balance.PLAYER_HIT_INVULN
 	_shake = 6.0
 	Fx.float_text(get_tree(), global_position, "-%d" % amount, Color("ff7060"))
 	if hp <= 0.0:
 		_die()
+	else:
+		sound_requested.emit("player_hurt", global_position)
 
 
 func _die() -> void:
 	is_dead = true
+	sound_requested.emit("player_death", global_position)
 	inventory.clear()
 	equipment.lose_bag()
 	progression.lose_unspent()
-	_respawn_time = Balance.RESPAWN_TIME
+	_respawn_time = Balance.RESPAWN_TIME * (1.0 - progression.value("quick_return") / 100.0)
 	collision_layer = 0
 	Fx.burst(get_tree(), global_position, Color("ff7060"), 20)
 	_sprite.visible = false
+	weapon_visual.hide()
 	Events.player_died.emit()
-	Events.message.emit("쓰러졌습니다. 들고 있던 자원, 가방 장비, 쓰지 않은 경험치를 모두 잃었습니다. %d초 뒤 왕국에서 부활합니다" % Balance.RESPAWN_TIME)
+	Events.message.emit("쓰러졌습니다. 들고 있던 자원, 가방 장비, 쓰지 않은 경험치를 모두 잃었습니다. %d초 뒤 왕국에서 부활합니다" % ceili(_respawn_time))
 	queue_redraw()
 
 
@@ -199,11 +232,12 @@ func _respawn() -> void:
 	collision_layer = PhysicsLayers.PLAYER
 	_invuln_time = Balance.RESPAWN_INVULN
 	_sprite.visible = true
+	weapon_visual.show()
 
 
 ## 다른 사람 화면에 보낼 겉모습 (멀티플레이 동기화용)
 func appearance() -> Dictionary:
-	return {"frame": _sprite.frame, "flip": _sprite.flip_h, "shown": _sprite.visible and not is_dead}
+	return {"frame": _sprite.frame, "flip": _sprite.flip_h, "shown": _sprite.visible and not is_dead, "weapon": equipment.item_in("weapon")}
 
 
 func respawn_time_left() -> float:
@@ -211,18 +245,52 @@ func respawn_time_left() -> float:
 
 
 func _fire_weapon() -> void:
-	var weapon := equipment.weapon().duplicate()
-	weapon["damage"] *= 1.0 + progression.value("keen_edge") / 100.0
+	var weapon := _boosted_weapon()
 	weapon["harvest_radius"] = progression.value("wide_harvest")
+	weapon["hits_world"] = hits_world
+	_show_attack(equipment.item_in("weapon"))
 	_fire_cooldown = 1.0 / float(weapon["rate"])
+	sound_requested.emit(SoundDB.weapon(equipment.item_in("weapon")), global_position)
 	if weapon.get("melee", false):
 		Melee.swing(get_tree(), global_position, aim_direction, weapon)
 		attacked.emit("swing", {"origin": global_position, "direction": aim_direction, "weapon": weapon})
-		_swing_time = SWING_SHOW_TIME
-		_swing_direction = aim_direction
-		_swing_item = equipment.item_in("weapon")
 		return
-	fire({"direction": aim_direction.rotated(randf_range(-0.03, 0.03)), "damage": weapon["damage"], "speed": weapon["speed"]})
+	fire({"direction": aim_direction.rotated(randf_range(-0.03, 0.03)), "damage": weapon["damage"], "speed": weapon["speed"],
+		"pierce": weapon.get("pierce", false), "splash_radius": weapon.get("splash_radius", 0.0), "execute_bonus": weapon["execute_bonus"]})
+
+
+## 장착한 무기에 전투 패시브를 더한 기본 공격 값 (D-020). 부를 때마다 마무리 일격 횟수를 센다
+func _boosted_weapon() -> Dictionary:
+	var weapon := equipment.weapon().duplicate()
+	var family: String = weapon.get("family", "")
+	var mastery: String = PassiveDB.FAMILY_MASTERY.get(family, "")
+	var bonus := progression.value("keen_edge") + (progression.value(mastery) if mastery != "" else 0.0)
+	weapon["damage"] *= 1.0 + bonus / 100.0
+	match family:
+		"sword":
+			weapon["arc"] += progression.value("sword_sweep")
+		"bow":
+			weapon["pierce"] = progression.value("piercing_arrows") > 0.0
+		"crossbow":
+			weapon["rate"] *= 1.0 + progression.value("rapid_reload") / 100.0
+		"staff":
+			weapon["splash_radius"] = progression.value("ember_burst")
+	var finisher := int(progression.value("combo_finisher"))
+	if finisher > 0:
+		_combo_count += 1
+		if _combo_count >= finisher:
+			_combo_count = 0
+			weapon["damage"] *= PassiveDB.COMBO_MULTIPLIER
+	weapon["execute_bonus"] = progression.value("executioner") / 100.0
+	return weapon
+
+
+## 재생 패시브: 한동안 맞지 않으면 체력이 차오른다
+func _regenerate(delta: float) -> void:
+	_since_hit += delta
+	var per_second := progression.value("regeneration")
+	if per_second > 0.0 and _since_hit >= PassiveDB.REGEN_DELAY and hp < max_hp():
+		hp = minf(max_hp(), hp + per_second * delta)
 
 
 func _move_input() -> Vector2:
@@ -244,35 +312,12 @@ func _update_sprite(delta: float) -> void:
 	_sprite.visible = not (_invuln_time > 0.0 and int(Time.get_ticks_msec() / 60.0) % 2 == 0)
 
 
-## 몸은 _sprite가 그리고, 여기서는 무기·공격 궤적·보호막만 그린다.
+## 몸·무기는 자식 노드가 그리고 보호막은 기존 표시를 유지한다.
 func _draw() -> void:
-	if is_dead:
-		return
-	var swinging := _swing_time > 0.0 and _swing_item == equipment.item_in("weapon")
-	if equipment.item_in("weapon") == "rusty_sword":
-		_draw_rusty_sword(swinging)
-	else:
-		draw_line(Vector2.ZERO, aim_direction * 20.0, Color("e8e0c8"), 3.0)
-		if swinging:
-			var weapon := equipment.weapon()
-			var half_arc := deg_to_rad(weapon["arc"]) / 2.0
-			draw_arc(Vector2.ZERO, weapon["range"], _swing_direction.angle() - half_arc, _swing_direction.angle() + half_arc, 16, Color("f4ecd0"), 4.0)
-	if _shield_time > 0.0:
+	if not is_dead and _shield_time > 0.0:
 		draw_arc(Vector2.ZERO, 20.0, 0.0, TAU, 24, Skills.color("shield"), 2.0)
 
 
-## 판정은 누른 순간 끝나므로 궤적도 첫 칸부터 범위 전체를 보인다.
-## 공격 중 마우스를 돌려도 이미 판정한 방향으로 궤적을 남긴다.
-func _draw_rusty_sword(swinging: bool) -> void:
-	var angle := aim_direction.angle()
-	if swinging:
-		var progress := clampf(1.0 - _swing_time / SWING_SHOW_TIME, 0.0, 1.0)
-		var frame := mini(int(progress * SLASH_FRAMES), SLASH_FRAMES - 1)
-		var size := Vector2.ONE * SLASH_FRAME_SIZE
-		draw_set_transform(Vector2.ZERO, _swing_direction.angle())
-		draw_texture_rect_region(SLASH_TEXTURE, Rect2(-size / 2.0, size), Rect2(Vector2(frame * SLASH_FRAME_SIZE, 0), size))
-		var half_arc := deg_to_rad(float(equipment.weapon()["arc"])) / 2.0
-		angle = _swing_direction.angle() + lerpf(-half_arc, half_arc, progress)
-	draw_set_transform(Vector2.ZERO, angle)
-	draw_texture(SWORD_TEXTURE, SWORD_OFFSET)
-	draw_set_transform(Vector2.ZERO)
+func _show_attack(id: String) -> void:
+	weapon_visual.attack(id, aim_direction, progression.value("sword_sweep"))
+	attack_visual_requested.emit(id, aim_direction)

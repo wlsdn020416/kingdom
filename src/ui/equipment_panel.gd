@@ -12,6 +12,9 @@ const SLOT_SIZE := 64
 const BAG_CELL_SIZE := 72
 const GRID_COLUMNS := 6
 const MIN_GEAR_CELLS := 24
+const WEAPON_ICON_SIZE := Vector2(48, 48)
+const WEAPON_ICON_TOP := 5.0
+const WEAPON_NAME_TOP := 43.0
 const MATERIAL_POLL_TIME := 0.2
 const SLOT_POSITIONS := {
 	"head": Vector2(160, 16), "weapon": Vector2(16, 144),
@@ -137,7 +140,7 @@ func _build_equipped(parent: HBoxContainer) -> void:
 		paper.add_child(caption)
 		var button := _cell(SLOT_SIZE)
 		button.position = at
-		button.pressed.connect(_equipment.unequip.bind(slot))
+		button.pressed.connect(_unequip_item.bind(slot))
 		button.mouse_entered.connect(_show_equipped_tooltip.bind(slot))
 		button.mouse_exited.connect(_hide_tooltip)
 		paper.add_child(button)
@@ -165,6 +168,9 @@ func _build_bags(parent: HBoxContainer) -> void:
 	_tabs.add_theme_color_override("font_unselected_color", MUTED)
 	_tabs.add_theme_font_size_override("font_size", 15)
 	_tabs.tab_changed.connect(func(_tab: int) -> void: _hide_tooltip())
+	_tabs.tab_changed.connect(func(_tab: int) -> void:
+		if _built and visible:
+			Events.ui_sound_requested.emit("click"))
 	box.add_child(_tabs)
 	var gear_box := _tab("장비")
 	_bag_count = _label("", 12, MUTED)
@@ -229,7 +235,7 @@ func _refresh() -> void:
 	for slot: String in ItemDB.SLOTS:
 		var button: Button = _slot_buttons[slot]
 		var id := _equipment.item_in(slot)
-		_set_cell_name(button, ItemDB.ITEMS[id]["name"] if id != "" else "—")
+		_set_cell_name(button, ItemDB.ITEMS[id]["name"] if id != "" else "—", id)
 		button.disabled = slot == "weapon" or id == ""
 		var style := _slot_style(256 if id != "" else 128)
 		button.add_theme_stylebox_override("normal", style)
@@ -237,7 +243,7 @@ func _refresh() -> void:
 	_clear_grid(_bag)
 	for id in _equipment.bag:
 		var button := _cell(BAG_CELL_SIZE)
-		_set_cell_name(button, ItemDB.ITEMS[id]["name"])
+		_set_cell_name(button, ItemDB.ITEMS[id]["name"], id)
 		var item: Dictionary = ItemDB.ITEMS[id]
 		var category := _label(ItemDB.SLOT_NAMES[item["slot"]], 10, MUTED)
 		category.position = Vector2(6, 4)
@@ -371,6 +377,13 @@ func _hide_tooltip() -> void:
 func _equip_item(id: String) -> void:
 	if _equipment.bag.has(id):
 		_equipment.equip(id)
+		Events.ui_sound_requested.emit("equip")
+
+
+func _unequip_item(slot: String) -> void:
+	if slot != "weapon" and _equipment.item_in(slot) != "":
+		_equipment.unequip(slot)
+		Events.ui_sound_requested.emit("equip")
 
 
 func _on_visibility_changed() -> void:
@@ -405,7 +418,7 @@ func _cell(size: int) -> Button:
 	return button
 
 
-func _set_cell_name(button: Button, text: String) -> void:
+func _set_cell_name(button: Button, text: String, id := "") -> void:
 	var label := button.get_node_or_null("Name") as Label
 	if label == null:
 		label = _label("", 12, TEXT)
@@ -417,6 +430,25 @@ func _set_cell_name(button: Button, text: String) -> void:
 		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		button.add_child(label)
 	label.text = text
+	var icon := button.get_node_or_null("WeaponIcon") as TextureRect
+	if not WeaponArtDB.WEAPONS.has(id):
+		if icon != null:
+			icon.hide()
+		label.position.y = 18
+		label.size.y = button.custom_minimum_size.y - 23
+		return
+	if icon == null:
+		icon = TextureRect.new()
+		icon.name = "WeaponIcon"
+		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		button.add_child(icon)
+	icon.texture = WeaponVisual.icon(id)
+	icon.size = WEAPON_ICON_SIZE
+	icon.position = Vector2((button.custom_minimum_size.x - icon.size.x) / 2.0, WEAPON_ICON_TOP)
+	icon.show()
+	label.position.y = WEAPON_NAME_TOP
+	label.size.y = button.custom_minimum_size.y - WEAPON_NAME_TOP - 2
 
 
 func _clear_grid(grid: GridContainer) -> void:

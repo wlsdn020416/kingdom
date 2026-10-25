@@ -12,6 +12,7 @@ const MASKS := {
 	Team.ENEMY: PhysicsLayers.OBJECTS | PhysicsLayers.BUILDINGS | PhysicsLayers.PLAYER,
 }
 const MAX_HITS_PER_STEP := 8
+const TEXTURE := preload("res://assets/combat/projectiles.png")
 
 var team := Team.PLAYER
 var velocity := Vector2.ZERO
@@ -21,15 +22,22 @@ var radius := 4.0
 var pierce := false
 var explode_radius := 0.0
 var harvest_radius := 0.0  # 광역 채집 패시브 (플레이어 탄만)
+var splash_radius := 0.0  # 불씨 폭발 패시브: 적을 맞히면 이 안의 다른 적에게도 일부 피해 (D-020)
+var execute_bonus := 0.0  # 처형자 패시브: 체력이 낮은 적에게 추가 피해 비율
 var source := Enemy.SOURCE_LOCAL  # 쏜 플레이어의 peer id (처치 보상용)
-## false면 나무·바위에 막히기만 하고 부수지 않는다. 호스트가 참가자의 공격을 다시 실행할 때 (월드 채집은 각자 화면에서, D-017)
+## false면 나무·바위·건물·핵에 막히기만 하고 피해를 주지 않는다. 멀티플레이 참가자 화면의 탄 (월드·왕국은 호스트만 바꾼다, D-017)
 var hits_world := true
 var color := Color("fff4c0")
+var art_id := "arrow"
+## 다른 사람 탄의 표시 전용 복제본. 체력·월드·보상을 바꾸지 않는다.
+var visual_only := false
+var _elapsed := 0.0
+var _flight_duration := 1.0
 var _already_hit := {}
 var _query := PhysicsShapeQueryParameters2D.new()
 
 
-## params: direction(필수), speed, damage, lifetime, radius, pierce, explode_radius, harvest_radius, color, team, source, hits_world
+## params: direction(필수), speed, damage, lifetime, radius, pierce, explode_radius, harvest_radius, splash_radius, execute_bonus, color, team, source, hits_world
 static func spawn(tree: SceneTree, at: Vector2, params: Dictionary) -> Projectile:
 	var projectile := Projectile.new()
 	projectile.team = params.get("team", Team.PLAYER)
@@ -40,12 +48,24 @@ static func spawn(tree: SceneTree, at: Vector2, params: Dictionary) -> Projectil
 	projectile.pierce = params.get("pierce", false)
 	projectile.explode_radius = params.get("explode_radius", 0.0)
 	projectile.harvest_radius = params.get("harvest_radius", 0.0)
+	projectile.splash_radius = params.get("splash_radius", 0.0)
+	projectile.execute_bonus = params.get("execute_bonus", 0.0)
 	projectile.source = Enemy.SOURCE_TOWER if projectile.team == Team.TOWER else params.get("source", Enemy.SOURCE_LOCAL)
 	projectile.hits_world = params.get("hits_world", true)
+	projectile.visual_only = params.get("visual_only", false)
+	if projectile.visual_only:
+		projectile.hits_world = false
+	projectile.art_id = params.get("art", "enemy_orb" if projectile.team == Team.ENEMY else "arrow")
+	if not WeaponArtDB.PROJECTILES.has(projectile.art_id):
+		projectile.art_id = "arrow"
+	projectile._flight_duration = maxf(projectile.lifetime, 0.001)
+	if projectile.team == Team.TOWER:
+		Events.world_sound_requested.emit("bow_shoot", at)
 	if projectile.team == Team.ENEMY:
 		Events.enemy_shot.emit(at, params)
 	projectile.color = params.get("color", projectile.color)
 	projectile.position = at
+	projectile.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	# 물리 콜백 도중에 불려도 안전하도록 다음 틈에 추가
 	tree.get_first_node_in_group("projectiles").add_child.call_deferred(projectile)
 	return projectile
@@ -59,8 +79,10 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	_elapsed += delta
 	position += velocity * delta
 	lifetime -= delta
+	queue_redraw()
 	if explode_radius > 0.0:
 		if lifetime <= 0.0:
 			_explode()
@@ -72,7 +94,17 @@ func _physics_process(delta: float) -> void:
 
 
 func _draw() -> void:
-	draw_rect(Rect2(-radius, -radius, radius * 2.0, radius * 2.0), color)
+	var angle := velocity.angle()
+	var offset := Vector2.ZERO
+	if art_id == "bomb":
+		# 떠오르는 높이는 그림만 바꾼다. 지면의 경로·수명·폭발 범위는 유지한다.
+		draw_rect(Rect2(-4, -1, 8, 2), Color(0.04, 0.06, 0.08, 0.3))
+		offset.y = -sin(clampf(_elapsed / _flight_duration, 0.0, 1.0) * PI) * WeaponArtDB.BOMB_LIFT
+		angle = _elapsed * WeaponArtDB.BOMB_SPIN
+	draw_set_transform(offset, angle)
+	var size := Vector2.ONE * WeaponArtDB.PROJECTILE_SIZE
+	draw_texture_rect_region(TEXTURE, Rect2(-size / 2.0, size), WeaponArtDB.projectile_region(art_id, _elapsed))
+	draw_set_transform(Vector2.ZERO)
 
 
 func _check_hits() -> void:
@@ -90,29 +122,49 @@ func _on_hit(body: Object) -> void:
 		if not hits_world:
 			pass
 		elif cell != World.NO_CELL and harvest_radius > 0.0:
-			world.damage_objects_around(cell, damage, harvest_radius)
+			world.damage_objects_around(cell, damage, harvest_radius, source)
 		elif cell != World.NO_CELL:
-			world.damage_object(cell, damage, team != Team.ENEMY)
+			world.damage_object(cell, damage, source if team == Team.PLAYER else World.NOBODY)
+		_show_impact()
 		queue_free()
 		return
 	if _already_hit.has(body):
 		return
 	_already_hit[body] = true
-	if body is Enemy:
-		(body as Enemy).take_damage(damage, source)
-	elif body.has_method("take_damage"):
-		body.take_damage(damage)
-	Fx.burst(get_tree(), global_position, color, 3, 80.0)
+	if visual_only:
+		pass
+	elif body is Enemy:
+		var enemy := body as Enemy
+		if splash_radius > 0.0:
+			_splash(enemy)
+		enemy.take_damage(enemy.damage_after_execute(damage, execute_bonus), source)
+	elif hits_world or body is Player:
+		# 참가자 화면에 따라 그린 적 탄은 내 캐릭터만 맞힌다. 건물·왕국 핵 피해는 호스트의 탄이 정한다 (D-017)
+		if body.has_method("take_damage"):
+			body.take_damage(damage)
+	_show_impact()
 	if not pierce:
 		queue_free()
 
 
+## 맞힌 적 주변의 다른 적에게 절반 피해 (불씨 폭발)
+func _splash(hit: Enemy) -> void:
+	for enemy: Enemy in get_tree().get_nodes_in_group("enemies"):
+		if enemy != hit and enemy.global_position.distance_to(hit.global_position) <= splash_radius + enemy.radius:
+			enemy.take_damage(damage * PassiveDB.EMBER_SPLASH_RATIO, source)
+	Fx.burst(get_tree(), hit.global_position, color, 8, splash_radius * 2.0)
+
+
 func _explode() -> void:
+	# 참가자 화면의 예측 탄은 호스트가 확정해 보낸 폭발음과 겹쳐 울리지 않는다.
+	if hits_world and not visual_only:
+		Events.world_sound_requested.emit("explosion", global_position)
+		Events.combat_effect_requested.emit("explosion", global_position, explode_radius / WeaponArtDB.EXPLOSION_RADIUS, 0.0)
 	for enemy: Enemy in get_tree().get_nodes_in_group("enemies"):
 		if enemy.global_position.distance_to(global_position) < explode_radius + enemy.radius:
-			enemy.take_damage(damage, source)
+			if not visual_only:
+				enemy.take_damage(damage, source)
 	if not hits_world:
-		Fx.burst(get_tree(), global_position, Color("ffb050"), 40, 260.0)
 		return
 	var world := get_tree().get_first_node_in_group("world") as World
 	var center := world.cell_at(global_position)
@@ -121,5 +173,10 @@ func _explode() -> void:
 		for x in range(-reach, reach + 1):
 			var cell := center + Vector2i(x, y)
 			if world.data.get_object(cell) in World.HARVESTABLE and world.cell_center(cell).distance_to(global_position) <= explode_radius:
-				world.damage_object(cell, damage, true)
-	Fx.burst(get_tree(), global_position, Color("ffb050"), 40, 260.0)
+				world.damage_object(cell, damage, source)
+
+
+func _show_impact() -> void:
+	if hits_world and not visual_only:
+		var effect := "fire_impact" if art_id in ["ember", "fireball", "enemy_orb"] else "impact"
+		Events.combat_effect_requested.emit(effect, global_position, 1.0, velocity.angle())
