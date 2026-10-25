@@ -95,6 +95,9 @@ class Runner extends Node:
 			_check(_heard.count("shield") == 1, "참가자: 내 행동음은 즉시 한 번 들리고 호스트가 되돌려 보내지 않음")
 
 	func _check_weapon_visuals(main: Main, remote: RemotePlayer, deadline: int) -> void:
+		var worn := "iron_helm" if role == "host" else "cloth_shoes"
+		main.player.equipment.add_to_bag(worn)
+		main.player.equipment.equip(worn)
 		if role == "host":
 			await _until(func() -> bool: return remote.weapon_visual.weapon_id == "old_bow" and remote.weapon_visual.attack_item == "old_bow", deadline)
 			_check(remote.weapon_visual.weapon_id == "old_bow" and remote.weapon_visual.attack_item == "old_bow", "호스트: 참가자의 활 장착과 발사 모션이 같은 원본으로 표시됨")
@@ -112,6 +115,10 @@ class Runner extends Node:
 				return main.get_node("Projectiles").get_children().any(func(node: Node) -> bool: return node is Projectile and node.visual_only and node.art_id == "ember")
 			await _until(seen, deadline)
 			_check(seen.call(), "참가자: 호스트가 쏜 화염탄은 피해 없는 표시 복제본으로 보임")
+		var expected_slot := "boots" if role == "host" else "head"
+		var expected_item := "cloth_shoes" if role == "host" else "iron_helm"
+		await _until(func() -> bool: return remote.equipment_visual._items.get(expected_slot) == expected_item, deadline)
+		_check(remote.equipment_visual._items.get(expected_slot) == expected_item, "상대가 착용한 장비 외형이 같은 시트로 전달됨")
 
 	## 참가자 옆에 늑대를 만들고 참가자의 공격으로 죽는지 본다. 그다음 적 생성을 끄고, 핵에 피해를 주고, 밤으로 넘긴다.
 	## 끝나면 참가자가 나갈 때까지 기다린다 (참가자의 검사에 호스트 상태가 필요하다)
@@ -182,6 +189,8 @@ class Runner extends Node:
 			"참가자: 내 공격으로 잡은 적의 경험치를 받음 (%d → %d)" % [xp_before, main.player.progression.xp])
 		await _until(func() -> bool: return not is_instance_valid(wolf) or wolf.is_queued_for_deletion(), deadline)
 		_check(not is_instance_valid(wolf) or wolf.is_queued_for_deletion(), "참가자: 죽은 적이 화면에서 사라짐")
+		await _until(func() -> bool: return main.combat_sync.hits_received > 0, deadline)
+		_check(main.combat_sync.hits_received > 0, "참가자: 호스트의 피해 숫자를 받아 내 화면에 띄움 (D-023)")
 		var expected_hp := Balance.CORE_MAX_HP - CORE_HIT
 		await _until(func() -> bool: return is_equal_approx(main.kingdom.core.hp, expected_hp), deadline)
 		_check(is_equal_approx(main.kingdom.core.hp, expected_hp), "참가자: 왕국 핵 체력이 호스트와 같음 (%d)" % main.kingdom.core.hp)

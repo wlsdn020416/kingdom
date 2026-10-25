@@ -14,6 +14,7 @@ func _initialize() -> void:
 	_test_recipes()
 	_test_chest_loot()
 	_test_outcome_rolls_use_given_rng()
+	_test_bosses_and_difficulty()
 	_test_biome_rings()
 	_test_material_sources()
 	_test_progression()
@@ -173,8 +174,66 @@ func _test_material_sources() -> void:
 		needed.merge(RecipeDB.RECIPES[id]["cost"])
 	var missing := needed.keys().filter(func(kind: String) -> bool: return not sources.has(kind))
 	_check(missing.is_empty(), "레시피·업그레이드 재료는 모두 채집이나 몬스터에게서 얻을 수 있음 %s" % [missing])
+	# 건물 재료(D-022): 보스의 정수는 보스를 잡으면 창고로 들어온다
+	sources["boss_essence"] = true
+	var building_needs := {}
+	var building_problems: Array[String] = []
+	for id: String in BuildingDB.ORDER:
+		var info: Dictionary = BuildingDB.TYPES[id]
+		building_needs.merge(info["cost"])
+		if not BuildingDB.CATEGORIES.has(info.get("category", "")) or info.get("tier", 0) > RecipeDB.max_tier():
+			building_problems.append(id)
+	for kind: String in building_needs:
+		if not sources.has(kind) or not Balance.RESOURCE_NAMES.has(kind):
+			building_problems.append(kind)
+	_check(building_problems.is_empty() and BuildingDB.ORDER.size() == BuildingDB.TYPES.size(),
+		"건물 데이터: 분류·제작대 단계가 맞고 모든 재료를 얻을 수 있음 %s" % [building_problems])
+	for category: String in BuildingDB.CATEGORIES:
+		_check(BuildingDB.in_category(category).size() >= 6, "%s 탭에 건물이 6종 이상 (%d)" % [BuildingDB.CATEGORY_NAMES[category], BuildingDB.in_category(category).size()])
+	_check(BuildingDB.TYPES["teleport_tower"].get("outside", false) and not BuildingDB.TYPES["stone_wall"].get("outside", false)
+		and BuildingDB.TYPES["workbench"].get("unique", false), "순간이동 탑은 왕국 밖 가능, 벽은 안에만, 제작대는 하나만")
 	_check(not Balance.RESOURCE_NAMES.has("gold"), "금은 자원이 아님 (경험치로 바뀜, D-015)")
 
+
+
+## 보스(D-021): 보스 밤마다 다른 보스, 21일차는 최종 보스, 패턴 데이터가 맞고, 난이도는 가파르게 오른다
+func _test_bosses_and_difficulty() -> void:
+	var nights: Array[String] = []
+	for day in range(3, Balance.FINAL_DAY + 1, 3):
+		nights.append(EnemyDB.boss_for(day))
+	var distinct := {}
+	for id in nights:
+		distinct[id] = true
+	_check(distinct.size() == nights.size() and nights.size() == 7, "3~21일차 보스 밤마다 다른 보스 %s" % [nights])
+	_check(EnemyDB.TYPES[EnemyDB.boss_for(Balance.FINAL_DAY)].get("final", false) and EnemyDB.boss_for(24) != EnemyDB.boss_for(21),
+		"21일차는 최종 보스, 그 뒤 보스 밤에는 최종 보스가 반복되지 않음")
+	var problems: Array[String] = []
+	for id: String in EnemyDB.TYPES:
+		var info: Dictionary = EnemyDB.TYPES[id]
+		if not info.get("is_boss", false):
+			continue
+		if not EnemyDB.BOSS_ORDER.has(id):
+			problems.append("%s 순서에 없음" % id)
+		for pattern: Dictionary in info.get("patterns", []):
+			if not pattern["type"] in ["radial", "spiral", "fan", "charge", "summon"] or pattern["interval"] <= 0.0:
+				problems.append("%s 패턴 %s" % [id, pattern["type"]])
+			if pattern["type"] == "summon" and not EnemyDB.TYPES.has(pattern["minion"]):
+				problems.append("%s 부하 %s" % [id, pattern["minion"]])
+		var last_at := 1.0
+		for phase: Dictionary in info.get("rage", []):
+			if phase["at"] >= last_at:
+				problems.append("%s 분노 순서" % id)
+			last_at = phase["at"]
+	_check(problems.is_empty(), "보스 패턴·부하·분노 데이터가 맞음 %s" % [problems])
+	var rising := true
+	for day in range(2, Balance.FINAL_DAY + 1):
+		rising = rising and Balance.wave_size(day) >= Balance.wave_size(day - 1) and Balance.wave_hp_scale(day) > Balance.wave_hp_scale(day - 1)
+	_check(rising and Balance.wave_size(Balance.FINAL_DAY) == Balance.WAVE_SIZE_MAX and Balance.wave_hp_scale(Balance.FINAL_DAY) >= 9.0
+		and Balance.wave_damage_scale(Balance.FINAL_DAY) >= 2.0,
+		"난이도: 날마다 오르고 21일차 침공은 %d마리·체력 %.1f배·피해 %.1f배" % [Balance.wave_size(21), Balance.wave_hp_scale(21), Balance.wave_damage_scale(21)])
+	_check(EnemyDB.invader_weights(1).keys() == ["slime"] and EnemyDB.invader_weights(11).has("fire_imp"),
+		"침공 구성: 1일차는 슬라임만, 11일차부터 화염 정령까지 섞임")
+	_check(is_equal_approx(Balance.boss_hp_scale(1), 1.0) and Balance.boss_hp_scale(4) > Balance.boss_hp_scale(2), "보스 체력은 플레이어 수만큼 늘어남")
 
 
 ## 패시브 트리(D-020) 데이터: 선행 노드가 같은 갈래에 있고, 노드 그래픽용 칸이 겹치지 않고, 무기 종류마다 숙련 노드가 있다
@@ -206,6 +265,9 @@ func _test_passive_tree() -> void:
 		if PassiveDB.nodes_in(branch).is_empty():
 			problems.append("%s 비어 있음" % branch)
 	_check(problems.is_empty(), "패시브 트리: 선행·칸·무기 종류가 맞음 %s" % [problems])
+	var unplaced := PassiveDB.PASSIVES.keys().filter(func(id: String) -> bool:
+		return not PassiveArtDB.LAYOUT.has(id) or not PassiveArtDB.ICON_ORDER.has(id))
+	_check(unplaced.is_empty() and PassiveDB.PASSIVES.size() >= 55, "모든 패시브 노드(%d개)가 패시브 창 배치에 있음 %s" % [PassiveDB.PASSIVES.size(), unplaced])
 
 
 ## 경험치·패시브(D-015): 비용만큼 쓰고 단계가 오르며, 죽으면 쓰지 않은 경험치만 사라진다
