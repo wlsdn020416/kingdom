@@ -46,13 +46,13 @@ func _physics_process(_delta: float) -> void:
 
 
 func _process(_delta: float) -> void:
-	player.attack_enabled = not build_mode.active and not hud.equipment_panel.visible
+	player.attack_enabled = not (build_mode.active or hud.build_menu.visible or hud.equipment_panel.visible or hud.storage_panel.visible)
 	player.skills_enabled = not build_mode.active
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event.is_action_pressed("build_toggle"):
-		build_mode.set_active(not build_mode.active)
+		_toggle_build_menu()
 	elif event.is_action_pressed("equipment"):
 		hud.equipment_panel.toggle()
 	elif event.is_action_pressed("meeting"):
@@ -61,9 +61,7 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("world_map"):
 		hud.toggle_big_map()
 	elif event.is_action_pressed("interact"):
-		var chest := world.find_chest_near(player.global_position)
-		if chest != World.NO_CELL:
-			world.open_chest(chest)
+		_interact()
 	elif event.is_action_pressed("repair"):
 		var error := kingdom.repair(player.global_position, player.inventory)
 		if error != "":
@@ -79,8 +77,33 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _close_overlays() -> void:
 	build_mode.set_active(false)
+	hud.build_menu.hide()
 	hud.equipment_panel.hide()
+	hud.storage_panel.hide()
 	hud.close_big_map()
+
+
+## B: 건설 메뉴를 열고 닫는다. 설치 중에 누르면 설치를 멈추고 메뉴로 돌아간다
+func _toggle_build_menu() -> void:
+	if hud.build_menu.visible:
+		hud.build_menu.hide()
+		return
+	_close_overlays()
+	hud.build_menu.open()
+
+
+## E: 장비 상자 창을 열고 닫거나, 월드의 보물 상자를 연다
+func _interact() -> void:
+	if hud.storage_panel.visible:
+		hud.storage_panel.hide()
+		return
+	var storage := kingdom.find_storage_near(player.global_position)
+	if storage != World.NO_CELL and not player.is_dead:
+		hud.storage_panel.open(storage)
+		return
+	var chest := world.find_chest_near(player.global_position)
+	if chest != World.NO_CELL:
+		world.open_chest(chest)
 
 
 ## 멀티플레이에서는 보상을 받은 플레이어를 신호에 실어야 한다. 지금은 1인이라 로컬 플레이어.

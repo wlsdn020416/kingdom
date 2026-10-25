@@ -89,17 +89,69 @@ func build(cell: Vector2i, type_id: String, builder_position: Vector2, payer: In
 	return ""
 
 
-## 철거하면 건설 비용의 절반을 돌려받는다
-func demolish(cell: Vector2i) -> void:
+## 철거하면 건설 비용의 절반을 돌려받는다. 성공하면 "", 실패하면 이유를 돌려준다
+func demolish(cell: Vector2i) -> String:
 	var building: Building = buildings.get(cell)
 	if building == null:
-		return
+		return ""
+	if not building.stored.is_empty():
+		return "장비 상자를 비운 뒤에 철거할 수 있습니다"
 	var cost: Dictionary = building.info["cost"]
 	for kind in cost:
 		stock[kind] += floori(cost[kind] * BuildingDB.REFUND_RATE)
 	buildings.erase(cell)
 	building.queue_free()
 	Events.map_cells_changed.emit([cell])
+	return ""
+
+
+## actor_position에서 열 수 있는 가장 가까운 장비 상자 칸. 없으면 World.NO_CELL
+func find_storage_near(actor_position: Vector2) -> Vector2i:
+	var best := World.NO_CELL
+	var best_distance := Balance.STORAGE_REACH
+	for cell: Vector2i in buildings:
+		var building: Building = buildings[cell]
+		var distance := building.global_position.distance_to(actor_position)
+		if building.storage_capacity() > 0 and distance <= best_distance:
+			best = cell
+			best_distance = distance
+	return best
+
+
+## 가방의 장비를 장비 상자에 맡긴다. 성공하면 "", 실패하면 이유를 돌려준다
+func store_item(cell: Vector2i, equipment: Equipment, id: String, actor_position: Vector2) -> String:
+	var error := _check_storage(cell, actor_position)
+	if error != "":
+		return error
+	var building: Building = buildings[cell]
+	if building.stored.size() >= building.storage_capacity():
+		return "장비 상자가 가득 찼습니다"
+	if not equipment.remove_from_bag(id):
+		return "가방에 없는 장비입니다"
+	building.stored.append(id)
+	return ""
+
+
+## 장비 상자의 장비를 가방으로 꺼낸다. 성공하면 "", 실패하면 이유를 돌려준다
+func take_item(cell: Vector2i, equipment: Equipment, id: String, actor_position: Vector2) -> String:
+	var error := _check_storage(cell, actor_position)
+	if error != "":
+		return error
+	var building: Building = buildings[cell]
+	if not building.stored.has(id):
+		return "상자에 없는 장비입니다"
+	building.stored.erase(id)
+	equipment.add_to_bag(id)
+	return ""
+
+
+func _check_storage(cell: Vector2i, actor_position: Vector2) -> String:
+	var building: Building = buildings.get(cell)
+	if building == null or building.storage_capacity() == 0:
+		return "장비 상자가 없습니다"
+	if building.global_position.distance_to(actor_position) > Balance.STORAGE_REACH:
+		return "장비 상자에서 너무 멉니다"
+	return ""
 
 
 ## 성공하면 "", 실패하면 이유를 돌려준다
@@ -125,6 +177,8 @@ func _someone_standing_on(cell: Vector2i) -> bool:
 
 
 func _on_building_destroyed(building: Building) -> void:
+	if not building.stored.is_empty():
+		Events.message.emit("장비 상자가 부서져 맡겨 둔 장비 %d개를 잃었습니다" % building.stored.size())
 	buildings.erase(building.cell)
 	Events.map_cells_changed.emit([building.cell])
 

@@ -155,12 +155,13 @@ func take_damage(amount: float) -> void:
 func _die() -> void:
 	is_dead = true
 	inventory.clear()
+	equipment.lose_bag()
 	_respawn_time = Balance.RESPAWN_TIME
 	collision_layer = 0
 	Fx.burst(get_tree(), global_position, Color("ff7060"), 20)
 	_sprite.visible = false
 	Events.player_died.emit()
-	Events.message.emit("쓰러졌습니다. 들고 있던 자원을 모두 잃었습니다. %d초 뒤 왕국에서 부활합니다" % Balance.RESPAWN_TIME)
+	Events.message.emit("쓰러졌습니다. 들고 있던 자원과 가방 장비를 모두 잃었습니다. %d초 뒤 왕국에서 부활합니다" % Balance.RESPAWN_TIME)
 	queue_redraw()
 
 

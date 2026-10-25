@@ -65,6 +65,20 @@ func add_to_bag(id: String) -> void:
 	changed.emit()
 
 
+func remove_from_bag(id: String) -> bool:
+	if not bag.has(id):
+		return false
+	bag.erase(id)
+	changed.emit()
+	return true
+
+
+## 죽으면 가방 장비를 전부 잃는다. 착용 중인 장비는 남는다 (D-014)
+func lose_bag() -> void:
+	bag.clear()
+	changed.emit()
+
+
 func equip(id: String) -> void:
 	var slot: String = ItemDB.ITEMS[id]["slot"]
 	var previous: String = equipped[slot]

@@ -24,7 +24,7 @@ Godot은 `--script`로 실행한 파일의 파싱 오류나 실행 중 스크립
 | --- | --- | --- |
 | 스크립트·씬 로딩 | `godot --headless --path . res://tests/check_scripts.tscn` | 모든 `.gd`의 파싱·컴파일(오토로드 포함), 모든 `.tscn`의 로딩과 `ext_resource` 경로 존재 |
 | 로직 테스트 | `godot --headless --path . --script res://tests/logic_test.gd` | 같은 시드 → 같은 월드, 시작 무기가 근거리, 스킬바 규칙(스킬 장비만·슬롯 순서·최대 4), 무기 해제 불가, 쿨타임, 대시가 장비 스킬이 아님 |
-| 스모크 테스트 | `godot --headless --path . res://tests/smoke_test.tscn` | 실제 `main.tscn`을 돌려 탐험 표시, 건설·영토 밖 거부, Space 대시·스킬 쿨타임, 상자 보상, 투사체 채집, 근거리 기본 공격(적 피격·나무 채집), 밤 전환·침공, 멸망 화면 |
+| 스모크 테스트 | `godot --headless --path . res://tests/smoke_test.tscn` | 실제 `main.tscn`을 돌려 탐험 표시, 건설·영토 밖 거부, Space 대시·스킬 쿨타임, 상자 보상, 투사체 채집, 근거리 기본 공격(적 피격·나무 채집), 건설 메뉴 → 설치 모드, 장비 상자, 개인 인벤토리(획득·지불·입고·사망 소멸), 밤 전환·침공, 멸망 화면 |
 | 월드 통계 (도구) | `godot --headless --path . --script res://tools/world_stats.gd` | 시드 6개의 지형 비율과 왕국에서 갈 수 있는 땅 비율. 통과/실패 판정 없음, 월드 생성 상수 조정 시 눈으로 확인 |
 | 직접 플레이 | `godot --path .` (시작 화면 건너뛰기: `godot --path . -- --seed=oak-1234`) | 그림, 조작감, UI 배치 — headless로 확인할 수 없는 것 |
 

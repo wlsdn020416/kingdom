@@ -1,6 +1,6 @@
 class_name ActionBar
 extends Control
-## 화면 아래 바. 평소엔 대시(Space)와 장비 스킬바(1~4), 건설 모드에선 건물 목록을 보여준다.
+## 화면 아래 바. 평소엔 대시(Space)와 장비 스킬바(1~4), 설치 모드에선 고른 건물과 조작법을 보여준다.
 
 const SLOT_SIZE := Vector2(72, 54)
 const BUILD_SLOT_SIZE := Vector2(110, 54)
@@ -67,15 +67,13 @@ func _draw_skill_slot(rect: Rect2, key: String, skill_id: String, skill_name: St
 
 func _draw_build_bar() -> void:
 	var font := ThemeDB.fallback_font
-	var start := _row_start(BuildingDB.ORDER.size(), BUILD_SLOT_SIZE.x)
-	for i in BuildingDB.ORDER.size():
-		var info: Dictionary = BuildingDB.TYPES[BuildingDB.ORDER[i]]
-		var rect := Rect2(start + Vector2(i * (BUILD_SLOT_SIZE.x + GAP), 0), BUILD_SLOT_SIZE)
-		_draw_slot(rect, i == _build_mode.selected)
-		draw_string(font, rect.position + Vector2(0, 22), "%d %s" % [i + 1, info["name"]], HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, 13, UiKit.TEXT)
-		var cost_color := UiKit.MUTED if _kingdom.can_afford(info["cost"], _player.inventory) else UiKit.DANGER
-		draw_string(font, rect.position + Vector2(0, 42), Balance.format_cost(info["cost"]), HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, 11, cost_color)
-	draw_string(font, Vector2(0, -8), "건설 모드 · 좌클릭 설치 · 우클릭 철거(반값 환불) · B로 종료", HORIZONTAL_ALIGNMENT_CENTER, size.x, 12, UiKit.ACCENT)
+	var info: Dictionary = BuildingDB.TYPES[_build_mode.selected_type()]
+	var rect := Rect2(_row_start(1, BUILD_SLOT_SIZE.x), BUILD_SLOT_SIZE)
+	_draw_slot(rect, true)
+	draw_string(font, rect.position + Vector2(0, 22), info["name"], HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, 13, UiKit.TEXT)
+	var cost_color := UiKit.MUTED if _kingdom.can_afford(info["cost"], _player.inventory) else UiKit.DANGER
+	draw_string(font, rect.position + Vector2(0, 42), Balance.format_cost(info["cost"]), HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, 11, cost_color)
+	draw_string(font, Vector2(0, -8), "설치 모드 · 좌클릭 설치 · 우클릭 철거(반값 환불) · B 건물 목록 · Esc 종료", HORIZONTAL_ALIGNMENT_CENTER, size.x, 12, UiKit.ACCENT)
 
 
 func _draw_slot(rect: Rect2, selected: bool) -> void:

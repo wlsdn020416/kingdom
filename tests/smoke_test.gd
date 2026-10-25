@@ -38,6 +38,8 @@ func _ready() -> void:
 
 	await _check_harvest(main)
 	await _check_melee(main)
+	await _check_build_menu(main)
+	await _check_storage(main)
 	await _check_inventory(main)
 
 	main.day_night.skip_to_night()
@@ -148,13 +150,77 @@ func _check_inventory(main: Main) -> void:
 
 	player.global_position = kingdom.core.global_position + Vector2(0, 9 * Balance.TILE)
 	player.inventory.add({"gold": 5})
+	player.equipment.add_to_bag("iron_helm")
 	# 직전 피격·대시 무적이 남아 있을 수 있어 풀릴 때까지 시도한다
 	for attempt in 120:
 		player.take_damage(999999.0)
 		if player.is_dead:
 			break
 		await _frames(1)
-	_check(player.is_dead and player.inventory.is_empty(), "죽으면 가방 자원이 모두 사라짐 (사망 %s, 가방 %s)" % [player.is_dead, player.inventory.amounts()])
+	_check(player.is_dead and player.inventory.is_empty() and player.equipment.bag.is_empty(), "죽으면 가방 자원과 가방 장비가 모두 사라짐 (사망 %s, 가방 %s, 장비 %s)" % [player.is_dead, player.inventory.amounts(), player.equipment.bag])
+
+
+## B는 건설 메뉴(게임은 계속 진행), 고르면 그 건물의 설치 모드, 설치 중 B는 메뉴로 돌아감
+func _check_build_menu(main: Main) -> void:
+	var press := func(action: String) -> void:
+		var event := InputEventAction.new()
+		event.action = action
+		event.pressed = true
+		Input.parse_input_event(event)
+	press.call("build_toggle")
+	await _frames(2)
+	_check(main.hud.build_menu.visible and not main.build_mode.active and not get_tree().paused and not main.player.attack_enabled,
+		"B로 건설 메뉴가 열리고 게임은 멈추지 않음")
+	main.hud.build_menu.choose("stone_wall")
+	await _frames(1)
+	_check(not main.hud.build_menu.visible and main.build_mode.active and main.build_mode.selected_type() == "stone_wall",
+		"메뉴에서 고르면 그 건물의 설치 모드")
+	press.call("build_toggle")
+	await _frames(2)
+	_check(main.hud.build_menu.visible and not main.build_mode.active, "설치 중 B는 건설 메뉴로 돌아감")
+	press.call("ui_cancel")
+	await _frames(2)
+	_check(not main.hud.build_menu.visible and not main.build_mode.active, "Esc로 건설 메뉴 닫힘")
+
+
+## 장비 상자(D-014): 맡기기·꺼내기, 비어 있지 않으면 철거 불가, E로 창 열기
+func _check_storage(main: Main) -> void:
+	var player := main.player
+	var kingdom := main.kingdom
+	player.global_position = player.spawn_point
+	await _frames(2)
+	kingdom.add_resources({"wood": 15})
+	var cell := World.NO_CELL
+	for offset in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1)]:
+		var candidate: Vector2i = main.world.cell_at(player.spawn_point) + offset
+		if main.world.data.is_walkable(candidate) and not kingdom.is_occupied(candidate):
+			cell = candidate
+			break
+	var error := kingdom.build(cell, "gear_chest", player.global_position, player.inventory)
+	_check(error == "" and kingdom.find_storage_near(player.global_position) == cell, "장비 상자 건설 %s" % error)
+	if error != "":
+		return
+	player.equipment.add_to_bag("chain_mail")
+	error = kingdom.store_item(cell, player.equipment, "chain_mail", player.global_position)
+	var building: Building = kingdom.buildings[cell]
+	_check(error == "" and building.stored == ["chain_mail"] and not player.equipment.bag.has("chain_mail"),
+		"가방 장비를 장비 상자에 맡김 %s" % error)
+	_check(kingdom.store_item(cell, player.equipment, "chain_mail", player.global_position) != "", "가방에 없는 장비는 맡길 수 없음")
+	_check(kingdom.take_item(cell, player.equipment, "chain_mail", player.global_position + Vector2(0, 10 * Balance.TILE)) != "",
+		"멀리서는 꺼낼 수 없음")
+	_check(kingdom.demolish(cell) != "" and kingdom.buildings.has(cell), "장비가 든 상자는 철거할 수 없음")
+
+	var interact := InputEventAction.new()
+	interact.action = "interact"
+	interact.pressed = true
+	Input.parse_input_event(interact)
+	await _frames(2)
+	_check(main.hud.storage_panel.visible and not player.attack_enabled, "E로 장비 상자 창이 열리고 공격이 꺼짐")
+	main.hud.storage_panel.hide()
+
+	error = kingdom.take_item(cell, player.equipment, "chain_mail", player.global_position)
+	_check(error == "" and building.stored.is_empty() and player.equipment.bag.has("chain_mail"), "장비 상자에서 가방으로 꺼냄 %s" % error)
+	_check(kingdom.demolish(cell) == "" and not kingdom.buildings.has(cell), "빈 장비 상자는 철거 가능")
 
 
 func _wood(main: Main) -> int:

@@ -2,13 +2,15 @@ class_name Hud
 extends CanvasLayer
 ## 화면 UI. 게임 상태를 매 프레임 읽어서 보여주기만 하고, 상태를 바꾸지 않는다.
 
-const HINT := "B 건설 · I 장비 · E 상자 · R 수리 · T 전략회의 · M 지도 · N 밤으로 넘기기"
+const HINT := "B 건설 · I 장비 · E 상자·장비 상자 · R 수리 · T 전략회의 · M 지도 · N 밤으로 넘기기"
 const MESSAGE_LIMIT := 4
 const MESSAGE_TIME := 4.0
 const MARGIN := 16.0
 const MINIMAP_SIZE := 180.0
 
 var equipment_panel: EquipmentPanel
+var storage_panel: StoragePanel
+var build_menu: BuildMenu
 var meeting_panel: MeetingPanel
 var game_over_panel: GameOverPanel
 
@@ -36,6 +38,12 @@ func setup(main: Main) -> void:
 	equipment_panel = EquipmentPanel.new()
 	add_child(equipment_panel)
 	equipment_panel.setup(main.player.equipment)
+	storage_panel = StoragePanel.new()
+	add_child(storage_panel)
+	storage_panel.setup(main.kingdom, main.player)
+	build_menu = BuildMenu.new()
+	add_child(build_menu)
+	build_menu.setup(main.build_mode, main.kingdom, main.player)
 	meeting_panel = MeetingPanel.new()
 	add_child(meeting_panel)
 	meeting_panel.setup(main.map_state)
