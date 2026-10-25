@@ -13,11 +13,14 @@ var last_result := ""
 var autostart_seed := ""
 ## 게임을 켜 있는 동안 계속 살아 있어야 해서 오토로드인 Session 아래에 둔다 (새 오토로드를 만들지 않음, D-016)
 var steam := SteamService.new()
+var net := NetSession.new()
 
 
 func _ready() -> void:
 	InputBindings.register()
 	add_child(steam)
+	add_child(net)
+	net.setup(steam)
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--seed="):
 			autostart_seed = arg.trim_prefix("--seed=")
@@ -30,6 +33,7 @@ func start_game(text: String) -> void:
 
 
 func back_to_title() -> void:
+	net.leave()
 	get_tree().paused = false
 	get_tree().change_scene_to_file(TITLE_SCENE)
 

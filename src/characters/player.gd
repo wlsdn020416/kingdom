@@ -3,6 +3,10 @@ extends CharacterBody2D
 ## 트윈스틱 조작 캐릭터. 이동(WASD)과 조준(마우스)은 서로 독립적이다.
 ## 대시(Space)는 모든 캐릭터의 기본 능력이고, 1~4 키는 장비에 달린 스킬을 쓴다.
 
+## 적에게 닿는 공격을 할 때마다 알린다. 멀티플레이 참가자는 이걸 호스트에 보내 호스트의 적에게 다시 실행한다 (D-017).
+## kind: "projectile"(Projectile 인자), "swing"(origin, direction, weapon), "blast"(origin, radius, damage)
+signal attacked(kind: String, data: Dictionary)
+
 const DASH_SPEED := 950.0
 const DASH_TIME := 0.18
 const LIGHT_RADIUS := 230.0
@@ -128,7 +132,15 @@ func max_hp() -> float:
 func fire(params: Dictionary) -> void:
 	params["harvest_radius"] = progression.value("wide_harvest")
 	var direction: Vector2 = params["direction"]
-	Projectile.spawn(get_tree(), global_position + direction * 14.0, params)
+	var at := global_position + direction * 14.0
+	Projectile.spawn(get_tree(), at, params)
+	attacked.emit("projectile", {"at": at, "params": params})
+
+
+## 주변 적 모두에게 피해 (함성)
+func blast(radius: float, damage: float) -> void:
+	Melee.blast(get_tree(), global_position, radius, damage)
+	attacked.emit("blast", {"origin": global_position, "radius": radius, "damage": damage})
 
 
 func dash() -> void:
@@ -189,6 +201,11 @@ func _respawn() -> void:
 	_sprite.visible = true
 
 
+## 다른 사람 화면에 보낼 겉모습 (멀티플레이 동기화용)
+func appearance() -> Dictionary:
+	return {"frame": _sprite.frame, "flip": _sprite.flip_h, "shown": _sprite.visible and not is_dead}
+
+
 func respawn_time_left() -> float:
 	return _respawn_time
 
@@ -200,6 +217,7 @@ func _fire_weapon() -> void:
 	_fire_cooldown = 1.0 / float(weapon["rate"])
 	if weapon.get("melee", false):
 		Melee.swing(get_tree(), global_position, aim_direction, weapon)
+		attacked.emit("swing", {"origin": global_position, "direction": aim_direction, "weapon": weapon})
 		_swing_time = SWING_SHOW_TIME
 		_swing_direction = aim_direction
 		_swing_item = equipment.item_in("weapon")

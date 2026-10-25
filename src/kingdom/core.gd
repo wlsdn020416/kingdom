@@ -23,6 +23,11 @@ func take_damage(amount: float) -> void:
 		Events.core_destroyed.emit()
 
 
+## 멀티플레이 참가자: 호스트가 계산한 체력을 보여준다. 멸망 판정은 호스트가 한다 (D-017)
+func set_synced_hp(value: float) -> void:
+	hp = clampf(value, 0.0, max_hp)
+
+
 func repair(amount: float) -> void:
 	hp = minf(max_hp, hp + amount)
 

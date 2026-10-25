@@ -35,11 +35,7 @@ static func cast(skill: Dictionary, player: Player) -> void:
 			player.fire({"direction": player.aim_direction, "damage": skill["damage"], "speed": 420.0,
 				"lifetime": distance / 420.0, "radius": 6.0, "explode_radius": skill["radius"], "color": color(id)})
 		"rally":
-			for enemy: Enemy in player.get_tree().get_nodes_in_group("enemies"):
-				var offset := enemy.global_position - player.global_position
-				if offset.length() < skill["radius"]:
-					enemy.take_damage(skill["damage"])
-					enemy.knockback(offset.normalized() * 420.0)
+			player.blast(skill["radius"], skill["damage"])
 			Fx.burst(player.get_tree(), player.global_position, color(id), 30, 300.0)
 		_:
 			push_warning("알 수 없는 스킬: %s" % id)

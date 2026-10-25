@@ -49,7 +49,7 @@ func _ready() -> void:
 	start.custom_minimum_size.x = 90
 	row.add_child(start)
 	box.add_child(row)
-	box.add_child(UiKit.note("프로토타입: 1인 플레이. 멀티플레이는 아직 없습니다."))
+	box.add_child(LobbyPanel.new().setup(Session.net))
 	var steam_color := UiKit.ACCENT if Session.steam.available else UiKit.MUTED
 	box.add_child(UiKit.heading("Steam: " + Session.steam.status_text, 13, steam_color))
 	_seed_input.grab_focus()
@@ -65,5 +65,10 @@ func _controls_grid() -> GridContainer:
 	return grid
 
 
+## 방에 있으면 호스트만 시작할 수 있고, 모두 같은 시드로 함께 시작한다
 func _start() -> void:
-	Session.start_game(_seed_input.text.strip_edges())
+	var seed_text := _seed_input.text.strip_edges()
+	if not Session.net.is_online():
+		Session.start_game(seed_text)
+	elif Session.net.is_host():
+		Session.net.start_game(seed_text)

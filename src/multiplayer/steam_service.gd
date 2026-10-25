@@ -25,6 +25,11 @@ func _ready() -> void:
 	print("Steam: " + status_text)
 
 
+## Steam API 싱글턴. 연결되지 않았으면 null
+func api() -> Object:
+	return _steam if available else null
+
+
 func _process(_delta: float) -> void:
 	if available:
 		_steam.run_callbacks()

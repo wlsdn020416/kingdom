@@ -21,12 +21,15 @@ var radius := 4.0
 var pierce := false
 var explode_radius := 0.0
 var harvest_radius := 0.0  # 광역 채집 패시브 (플레이어 탄만)
+var source := Enemy.SOURCE_LOCAL  # 쏜 플레이어의 peer id (처치 보상용)
+## false면 나무·바위에 막히기만 하고 부수지 않는다. 호스트가 참가자의 공격을 다시 실행할 때 (월드 채집은 각자 화면에서, D-017)
+var hits_world := true
 var color := Color("fff4c0")
 var _already_hit := {}
 var _query := PhysicsShapeQueryParameters2D.new()
 
 
-## params: direction(필수), speed, damage, lifetime, radius, pierce, explode_radius, harvest_radius, color, team
+## params: direction(필수), speed, damage, lifetime, radius, pierce, explode_radius, harvest_radius, color, team, source, hits_world
 static func spawn(tree: SceneTree, at: Vector2, params: Dictionary) -> Projectile:
 	var projectile := Projectile.new()
 	projectile.team = params.get("team", Team.PLAYER)
@@ -37,6 +40,10 @@ static func spawn(tree: SceneTree, at: Vector2, params: Dictionary) -> Projectil
 	projectile.pierce = params.get("pierce", false)
 	projectile.explode_radius = params.get("explode_radius", 0.0)
 	projectile.harvest_radius = params.get("harvest_radius", 0.0)
+	projectile.source = Enemy.SOURCE_TOWER if projectile.team == Team.TOWER else params.get("source", Enemy.SOURCE_LOCAL)
+	projectile.hits_world = params.get("hits_world", true)
+	if projectile.team == Team.ENEMY:
+		Events.enemy_shot.emit(at, params)
 	projectile.color = params.get("color", projectile.color)
 	projectile.position = at
 	# 물리 콜백 도중에 불려도 안전하도록 다음 틈에 추가
@@ -80,7 +87,9 @@ func _on_hit(body: Object) -> void:
 	if body is TileMapLayer:
 		var world := (body as TileMapLayer).get_parent() as World
 		var cell := world.object_cell_near(global_position, radius)
-		if cell != World.NO_CELL and harvest_radius > 0.0:
+		if not hits_world:
+			pass
+		elif cell != World.NO_CELL and harvest_radius > 0.0:
 			world.damage_objects_around(cell, damage, harvest_radius)
 		elif cell != World.NO_CELL:
 			world.damage_object(cell, damage, team != Team.ENEMY)
@@ -90,7 +99,7 @@ func _on_hit(body: Object) -> void:
 		return
 	_already_hit[body] = true
 	if body is Enemy:
-		(body as Enemy).take_damage(damage, team == Team.TOWER)
+		(body as Enemy).take_damage(damage, source)
 	elif body.has_method("take_damage"):
 		body.take_damage(damage)
 	Fx.burst(get_tree(), global_position, color, 3, 80.0)
@@ -101,7 +110,10 @@ func _on_hit(body: Object) -> void:
 func _explode() -> void:
 	for enemy: Enemy in get_tree().get_nodes_in_group("enemies"):
 		if enemy.global_position.distance_to(global_position) < explode_radius + enemy.radius:
-			enemy.take_damage(damage)
+			enemy.take_damage(damage, source)
+	if not hits_world:
+		Fx.burst(get_tree(), global_position, Color("ffb050"), 40, 260.0)
+		return
 	var world := get_tree().get_first_node_in_group("world") as World
 	var center := world.cell_at(global_position)
 	var reach := ceili(explode_radius / Balance.TILE)

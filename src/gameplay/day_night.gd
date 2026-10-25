@@ -12,6 +12,9 @@ var phase := Phase.DAY
 var day := 1
 var time := 0.0
 
+## 멀티플레이 참가자: 낮/밤 전환은 호스트 시간(apply_host_time)을 따르고 스스로 넘기지 않는다 (D-017)
+var follows_host := false
+
 var _darkness_node: CanvasModulate
 
 
@@ -21,7 +24,9 @@ func setup(darkness_node: CanvasModulate) -> void:
 
 func _process(delta: float) -> void:
 	time += delta
-	if phase == Phase.DAY and time >= Balance.DAY_LENGTH:
+	if follows_host:
+		pass
+	elif phase == Phase.DAY and time >= Balance.DAY_LENGTH:
 		_start_night()
 	elif phase == Phase.NIGHT and time >= Balance.NIGHT_LENGTH:
 		_start_day()
@@ -48,6 +53,19 @@ func darkness() -> float:
 	if day > 1 and time < Balance.DAWN_LENGTH:
 		return 1.0 - time / Balance.DAWN_LENGTH
 	return 0.0
+
+
+## 호스트가 보낸 시간으로 맞춘다. 낮/밤이 바뀌었으면 호스트와 같은 신호를 낸다
+func apply_host_time(host_phase: int, host_day: int, host_time: float) -> void:
+	var changed := host_phase != phase or host_day != day
+	day = host_day
+	time = host_time
+	if changed:
+		phase = host_phase
+		if is_night():
+			Events.night_started.emit(day)
+		else:
+			Events.day_started.emit(day)
 
 
 ## 테스트용 (N 키)

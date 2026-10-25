@@ -13,6 +13,8 @@ extends Node2D
 
 var map_state: MapState
 var kills := 0
+var player_sync := PlayerSync.new()
+var combat_sync := CombatSync.new()
 
 
 func _ready() -> void:
@@ -27,6 +29,15 @@ func _ready() -> void:
 	build_mode.setup(world, kingdom, player)
 	$PingMarkers.setup(map_state, world)
 	hud.setup(self)
+	player_sync.name = "PlayerSync"
+	player_sync.setup(Session.net, player, self)
+	add_child(player_sync)
+	combat_sync.name = "CombatSync"
+	combat_sync.setup(Session.net, self)
+	add_child(combat_sync)
+	# 적·웨이브는 호스트만 만든다. 참가자는 CombatSync가 받은 모습만 그린다 (D-017)
+	if not Session.net.is_host():
+		spawner.process_mode = Node.PROCESS_MODE_DISABLED
 
 	Events.resources_gained.connect(_on_resources_gained)
 	Events.chest_opened.connect(_on_chest_opened)
@@ -71,8 +82,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		var error := kingdom.repair(player.global_position, player.inventory)
 		if error != "":
 			Events.message.emit(error)
+		elif not Session.net.is_host():
+			combat_sync.request_repair()
 	elif event.is_action_pressed("skip_night"):
-		day_night.skip_to_night()
+		if Session.net.is_host():
+			day_night.skip_to_night()
+		else:
+			combat_sync.request_skip_night()
 	elif event.is_action_pressed("ui_cancel"):
 		_close_overlays()
 	else:
@@ -152,16 +168,27 @@ func _on_enemy_killed(enemy: Node) -> void:
 	if killed.stats.get("is_boss", false):
 		Events.message.emit("보스 처치!")
 	var xp: int = killed.stats.get("xp", 0)
-	if killed.killed_by_tower:
-		var players := get_tree().get_nodes_in_group("player")
-		for each: Player in players:
-			_give_xp(each, Balance.tower_xp_share(xp, players.size()), killed.global_position)
+	var at := killed.global_position
+	if killed.killed_by == Enemy.SOURCE_TOWER:
+		var share := Balance.tower_xp_share(xp, player_sync.player_count())
+		_give_xp(player, share, at)
+		for peer_id: int in player_sync.remote_ids():
+			combat_sync.send_reward(peer_id, share, {}, at)
+		return
+	# 다른 사람의 약탈자 패시브는 호스트가 모르므로 보너스 없이 굴린다 (임시)
+	var bonus := player.progression.value("scavenger") / 100.0 if killed.killed_by == Enemy.SOURCE_LOCAL else 0.0
+	var drop := EnemyDB.roll_drop(killed.type_id, bonus) if not killed.is_invader else {}
+	if killed.killed_by == Enemy.SOURCE_LOCAL:
+		grant_reward(xp, drop, at)
 	else:
-		_give_xp(player, xp, killed.global_position)
-	if not killed.is_invader:
-		var drop := EnemyDB.roll_drop(killed.type_id, player.progression.value("scavenger") / 100.0)
-		if not drop.is_empty():
-			Events.resources_gained.emit(drop, killed.global_position + Vector2(0, -16))
+		combat_sync.send_reward(killed.killed_by, xp, drop, at)
+
+
+## 처치 보상을 내 캐릭터에 준다 (호스트가 보낸 보상도 여기로 온다)
+func grant_reward(xp: int, resources: Dictionary, at: Vector2) -> void:
+	_give_xp(player, xp, at)
+	if not resources.is_empty():
+		Events.resources_gained.emit(resources, at + Vector2(0, -16))
 
 
 ## 풍요로운 손: 부순 오브젝트의 재료를 더 준다
@@ -188,9 +215,15 @@ func _give_xp(receiver: Player, amount: int, at: Vector2) -> void:
 	Fx.float_text(get_tree(), at + Vector2(0, -28), "경험치 +%d" % amount, Color("b48cff"))
 
 
+## 멸망 판정은 호스트만 한다. 참가자에게는 CombatSync가 같은 문장을 보낸다
 func _on_core_destroyed() -> void:
 	var summary := "%d일차 %s에 왕국이 무너졌습니다. 처치한 적 %d마리." % [
 		day_night.day, "밤" if day_night.is_night() else "낮", kills]
+	combat_sync.send_game_over(summary)
+	show_game_over(summary)
+
+
+func show_game_over(summary: String) -> void:
 	Session.last_result = summary
 	_close_overlays()
 	get_tree().paused = true

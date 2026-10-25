@@ -82,7 +82,9 @@ func _spawn_wanderer() -> void:
 	var wanderers := get_tree().get_nodes_in_group("enemies").filter(func(e: Enemy) -> bool: return not e.is_invader)
 	if wanderers.size() >= Balance.WANDERER_MAX:
 		return
-	var at: Variant = _find_spawn(_player.global_position, Balance.WANDERER_SPAWN_RING, true)
+	# 멀티플레이에서는 아무 플레이어 주변에나 나온다 (호스트 화면에 있는 RemotePlayer 포함, D-017)
+	var around: Node2D = get_tree().get_nodes_in_group("player").pick_random()
+	var at: Variant = _find_spawn(around.global_position, Balance.WANDERER_SPAWN_RING, true)
 	if at != null:
 		_spawn(EnemyDB.wanderer_for(_world.data.get_terrain(_world.cell_at(at))), at, false, 1.0)
 

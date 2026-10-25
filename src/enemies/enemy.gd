@@ -1,7 +1,8 @@
 class_name Enemy
 extends CharacterBody2D
 ## 적. 침공(invader) 적은 왕국 핵으로 가면서 길을 막는 벽·나무를 부순다.
-## 낮에 돌아다니는 적은 플레이어가 가까이 오면 쫓아온다.
+## 낮에 돌아다니는 적은 플레이어가 가까이 오면 쫓아온다. 멀티플레이에서는 호스트에만 있고(D-017)
+## 대상은 "player" 그룹(로컬 Player와 다른 사람의 RemotePlayer) 중 가장 가까운 살아 있는 플레이어다.
 
 const SPRITE_TEXTURE := preload("res://assets/enemies/enemies.png")
 const SPRITE_SIZE := 64
@@ -9,6 +10,12 @@ const SPRITE_OFFSET := Vector2(-32, -40)
 const ANIMATION_FRAMES := 4
 const ANIMATION_FPS := 8.0
 const IDLE_ANIMATED := ["slime", "bog_slime", "fire_imp", "boss"]
+## take_damage의 source: 플레이어는 멀티플레이 peer id(혼자·호스트 = 1), 화살탑은 이 값
+const SOURCE_TOWER := -1
+const SOURCE_LOCAL := 1
+
+## 참가자 화면에 같은 적을 그리기 위한 번호 (호스트에서만 매긴다)
+static var _next_net_id := 1
 
 var type_id := ""
 var stats := {}
@@ -16,9 +23,11 @@ var hp := 1.0
 var max_hp := 1.0
 var radius := 10.0
 var is_invader := false
-var killed_by_tower := false
+var net_id := 0
+## 마지막 일격을 준 쪽 (SOURCE_TOWER 또는 peer id). 처치 보상을 누구에게 줄지 정한다
+var killed_by := SOURCE_LOCAL
 
-var _player: Player
+var _target: Node2D  # 이번 프레임에 노리는 플레이어 (Player 또는 RemotePlayer)
 var _core: Core
 var _world: World
 var _attack_cooldown := 0.0
@@ -52,7 +61,8 @@ func _ready() -> void:
 	var collider := CollisionShape2D.new()
 	collider.shape = shape
 	add_child(collider)
-	_player = get_tree().get_first_node_in_group("player")
+	net_id = _next_net_id
+	_next_net_id += 1
 	_core = get_tree().get_first_node_in_group("core")
 	_world = get_tree().get_first_node_in_group("world")
 	_wander_direction = Vector2.from_angle(randf() * TAU)
@@ -61,14 +71,15 @@ func _ready() -> void:
 func _physics_process(delta: float) -> void:
 	_attack_cooldown -= delta
 	_flash -= delta
+	_target = _nearest_player()
 	var chasing_player := _player_in_aggro()
 	var target: Vector2
 	if chasing_player:
-		target = _player.global_position
+		target = _target.global_position
 	elif is_invader:
 		target = _core.global_position
 	else:
-		if global_position.distance_to(_player.global_position) > Balance.WANDERER_DESPAWN_DISTANCE:
+		if _target == null or global_position.distance_to(_target.global_position) > Balance.WANDERER_DESPAWN_DISTANCE:
 			queue_free()
 			return
 		if randf() < delta * 0.5:
@@ -89,15 +100,15 @@ func _physics_process(delta: float) -> void:
 	queue_redraw()
 
 
-## by_tower: 화살탑 탄. 마지막 일격이 탑이면 처치 경험치를 모든 플레이어가 나눠 받는다 (D-015)
-func take_damage(amount: float, by_tower := false) -> void:
+## source: 누가 때렸나 (SOURCE_TOWER 또는 peer id). 마지막 일격이 탑이면 처치 경험치를 모두 나눠 받는다 (D-015)
+func take_damage(amount: float, source := SOURCE_LOCAL) -> void:
 	if _dying:
 		return
 	hp -= amount
 	_flash = 0.08
 	if hp <= 0.0:
 		_dying = true
-		killed_by_tower = by_tower
+		killed_by = source
 		Fx.burst(get_tree(), global_position, stats["color"], 12)
 		Events.enemy_killed.emit(self)
 		queue_free()
@@ -114,11 +125,29 @@ func burn_away() -> void:
 	queue_free()
 
 
+## 다른 사람 화면에 그릴 모습: [번호, 종류, 위치, 체력 비율, 애니메이션 칸, 왼쪽 보기, 맞아서 번쩍임]
+func appearance() -> Array:
+	return [net_id, type_id, global_position, hp / max_hp, _animation_frame, _facing_left, _flash > 0.0]
+
+
+func _nearest_player() -> Node2D:
+	var best: Node2D = null
+	var best_distance := INF
+	for candidate: Node2D in get_tree().get_nodes_in_group("player"):
+		if candidate.is_dead:
+			continue
+		var distance := global_position.distance_to(candidate.global_position)
+		if distance < best_distance:
+			best = candidate
+			best_distance = distance
+	return best
+
+
 func _player_in_aggro() -> bool:
-	if _player.is_dead:
+	if _target == null:
 		return false
 	var aggro := Balance.INVADER_AGGRO if is_invader else Balance.WANDERER_AGGRO
-	return global_position.distance_to(_player.global_position) < aggro
+	return global_position.distance_to(_target.global_position) < aggro
 
 
 ## 부딪힌 벽·핵·나무를 공격한다
@@ -142,10 +171,10 @@ func _attack_blockers() -> void:
 
 
 func _touch_player() -> void:
-	if _attack_cooldown > 0.0 or _player.is_dead:
+	if _attack_cooldown > 0.0 or _target == null:
 		return
-	if global_position.distance_to(_player.global_position) < radius + 14.0:
-		_player.take_damage(stats["damage"])
+	if global_position.distance_to(_target.global_position) < radius + 14.0:
+		_target.take_damage(stats["damage"])
 		_attack_cooldown = Balance.ENEMY_ATTACK_INTERVAL
 
 
@@ -175,14 +204,20 @@ func _update_animation(delta: float) -> void:
 
 
 func _draw() -> void:
-	var row: int = stats["sprite_row"]
-	var region := Rect2(Vector2(_animation_frame * SPRITE_SIZE, row * SPRITE_SIZE), Vector2.ONE * SPRITE_SIZE)
-	var tint := Color(2.4, 2.4, 2.4) if _flash > 0.0 else Color.WHITE
-	draw_set_transform(Vector2.ZERO, 0.0, Vector2(-1 if _facing_left else 1, 1))
-	draw_texture_rect_region(SPRITE_TEXTURE, Rect2(SPRITE_OFFSET, Vector2.ONE * SPRITE_SIZE), region, tint)
-	draw_set_transform(Vector2.ZERO)
-	if hp < max_hp:
-		var width := maxi(HealthBarArt.WIDTH, roundi(radius * 2.0 + 8.0))
-		var sprite_top: int = stats["sprite_top"]
-		var bar_y := minf(-radius - 12.0, sprite_top + SPRITE_OFFSET.y - HealthBarArt.HEIGHT - 2.0)
-		HealthBarArt.draw_bar(self, Vector2(-width / 2.0, bar_y), hp / max_hp, HealthBarArt.Tone.RED, width)
+	draw_body(self, type_id, _animation_frame, _facing_left, _flash > 0.0, hp / max_hp, radius)
+
+
+## 참가자 화면의 EnemyPuppet도 같은 그림을 쓴다
+static func draw_body(canvas: CanvasItem, id: String, frame: int, facing_left: bool, flashing: bool, hp_ratio: float, body_radius: float) -> void:
+	var info: Dictionary = EnemyDB.TYPES[id]
+	var row: int = info["sprite_row"]
+	var region := Rect2(Vector2(frame * SPRITE_SIZE, row * SPRITE_SIZE), Vector2.ONE * SPRITE_SIZE)
+	var tint := Color(2.4, 2.4, 2.4) if flashing else Color.WHITE
+	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2(-1 if facing_left else 1, 1))
+	canvas.draw_texture_rect_region(SPRITE_TEXTURE, Rect2(SPRITE_OFFSET, Vector2.ONE * SPRITE_SIZE), region, tint)
+	canvas.draw_set_transform(Vector2.ZERO)
+	if hp_ratio < 1.0:
+		var width := maxi(HealthBarArt.WIDTH, roundi(body_radius * 2.0 + 8.0))
+		var sprite_top: int = info["sprite_top"]
+		var bar_y := minf(-body_radius - 12.0, sprite_top + SPRITE_OFFSET.y - HealthBarArt.HEIGHT - 2.0)
+		HealthBarArt.draw_bar(canvas, Vector2(-width / 2.0, bar_y), hp_ratio, HealthBarArt.Tone.RED, width)

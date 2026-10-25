@@ -4,9 +4,11 @@ extends RefCounted
 ## 조준 방향 부채꼴 안의 적을 모두 때리고, 앞에 있는 나무·바위·광석·상자 하나에 피해를 준다.
 
 const KNOCKBACK := 260.0
+const BLAST_KNOCKBACK := 420.0
 
 
-## weapon: ItemDB의 weapon 항목 (damage, range, arc). "harvest_radius"가 있으면 광역 채집 (D-015)
+## weapon: ItemDB의 weapon 항목 (damage, range, arc). "harvest_radius"가 있으면 광역 채집 (D-015).
+## "source"(peer id)는 처치 보상용, "hits_world"가 false면 나무·바위는 건드리지 않는다 (호스트가 참가자 공격을 다시 실행할 때)
 static func swing(tree: SceneTree, origin: Vector2, direction: Vector2, weapon: Dictionary) -> void:
 	var reach: float = weapon["range"]
 	var half_arc := deg_to_rad(weapon["arc"]) / 2.0
@@ -17,9 +19,21 @@ static func swing(tree: SceneTree, origin: Vector2, direction: Vector2, weapon: 
 		# 몸이 겹칠 만큼 붙은 적은 방향과 상관없이 맞는다
 		if offset.length() > enemy.radius and absf(direction.angle_to(offset)) > half_arc:
 			continue
-		enemy.take_damage(weapon["damage"])
+		enemy.take_damage(weapon["damage"], weapon.get("source", Enemy.SOURCE_LOCAL))
 		enemy.knockback(offset.normalized() * KNOCKBACK)
+	if not weapon.get("hits_world", true):
+		return
 	var world := tree.get_first_node_in_group("world") as World
 	var cell := world.object_cell_near(origin + direction * reach * 0.6, reach * 0.5)
 	if cell != World.NO_CELL:
 		world.damage_objects_around(cell, weapon["damage"], weapon.get("harvest_radius", 0.0))
+
+
+## 주변 적 모두에게 피해와 넉백 (함성 스킬). source는 처치 보상용 peer id
+static func blast(tree: SceneTree, origin: Vector2, radius: float, damage: float, source := Enemy.SOURCE_LOCAL) -> void:
+	for enemy: Enemy in tree.get_nodes_in_group("enemies"):
+		var offset := enemy.global_position - origin
+		if offset.length() < radius:
+			enemy.take_damage(damage, source)
+			enemy.knockback(offset.normalized() * BLAST_KNOCKBACK)
+
