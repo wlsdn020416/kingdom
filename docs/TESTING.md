@@ -11,7 +11,7 @@ sh tests/run_all.sh
 # 다른 Godot을 쓰려면: GODOT=/path/to/godot sh tests/run_all.sh
 ```
 
-세 검사를 순서대로 실행하고 `PASS  <이름>` / `FAIL  <이름>`을 출력한다. 하나라도 실패하면 종료 코드 1. 약 25초.
+먼저 `godot --headless --path . --import`로 프로젝트를 다시 훑은 뒤(새 `class_name` 등록) 세 검사를 순서대로 실행하고 `PASS  <이름>` / `FAIL  <이름>`을 출력한다. 하나라도 실패하면 종료 코드 1. 약 25초.
 로그는 `$TMPDIR/kingdom-tests/*.log`에 남는다.
 
 통과 조건은 **종료 코드 0 + 결과 줄 `<이름> PASS` + 로그에 `SCRIPT ERROR` 없음** 세 가지 모두다.
@@ -23,8 +23,8 @@ Godot은 `--script`로 실행한 파일의 파싱 오류나 실행 중 스크립
 | 검사 | 명령 | 확인하는 것 |
 | --- | --- | --- |
 | 스크립트·씬 로딩 | `godot --headless --path . res://tests/check_scripts.tscn` | 모든 `.gd`의 파싱·컴파일(오토로드 포함), 모든 `.tscn`의 로딩과 `ext_resource` 경로 존재 |
-| 로직 테스트 | `godot --headless --path . --script res://tests/logic_test.gd` | 같은 시드 → 같은 월드, 스킬바 규칙(스킬 장비만·슬롯 순서·최대 4), 무기 해제 불가, 쿨타임, 대시가 장비 스킬이 아님 |
-| 스모크 테스트 | `godot --headless --path . res://tests/smoke_test.tscn` | 실제 `main.tscn`을 돌려 탐험 표시, 건설·영토 밖 거부, Space 대시·스킬 쿨타임, 상자 보상, 투사체 채집, 밤 전환·침공, 멸망 화면 |
+| 로직 테스트 | `godot --headless --path . --script res://tests/logic_test.gd` | 같은 시드 → 같은 월드, 시작 무기가 근거리, 스킬바 규칙(스킬 장비만·슬롯 순서·최대 4), 무기 해제 불가, 쿨타임, 대시가 장비 스킬이 아님 |
+| 스모크 테스트 | `godot --headless --path . res://tests/smoke_test.tscn` | 실제 `main.tscn`을 돌려 탐험 표시, 건설·영토 밖 거부, Space 대시·스킬 쿨타임, 상자 보상, 투사체 채집, 근거리 기본 공격(적 피격·나무 채집), 밤 전환·침공, 멸망 화면 |
 | 월드 통계 (도구) | `godot --headless --path . --script res://tools/world_stats.gd` | 시드 6개의 지형 비율과 왕국에서 갈 수 있는 땅 비율. 통과/실패 판정 없음, 월드 생성 상수 조정 시 눈으로 확인 |
 | 직접 플레이 | `godot --path .` (시작 화면 건너뛰기: `godot --path . -- --seed=oak-1234`) | 그림, 조작감, UI 배치 — headless로 확인할 수 없는 것 |
 
@@ -40,6 +40,7 @@ Godot은 `--script`로 실행한 파일의 파싱 오류나 실행 중 스크립
 - `godot --check-only --script res://x.gd`는 쓰지 않는다. 오토로드를 몰라 정상 코드도 `Identifier not found: Events`로 실패하고, 실제 파싱 오류가 있어도 종료 코드 0이다.
 - `ResourceLoader.load()`로 씬을 불러오면 `ext_resource` 경로가 깨져도 씬이 반환된다. 그래서 `check_scripts.gd`가 의존 파일 존재를 따로 확인한다.
 - 실행 중인 스크립트 자신을 `CACHE_MODE_IGNORE`로 다시 불러오면 엔진이 signal 11로 죽는다. `check_scripts.gd`는 자기 자신을 건너뛴다.
+- 새 `class_name` 파일을 만든 직후에는 전역 클래스 캐시(`.godot/global_script_class_cache.cfg`)에 없어서 다른 스크립트가 `Identifier not declared`로 실패한다. 개별 검사를 돌리기 전에 `godot --headless --path . --import`를 한 번 실행한다(`run_all.sh`는 자동으로 함).
 - `Engine.time_scale`을 바꾼 테스트는 끝나기 전에 1.0으로 되돌린다.
 
 ## 확인할 수 없는 것 (현재 한계)

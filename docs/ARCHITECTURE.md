@@ -80,7 +80,7 @@ Main (Node2D, scenes/main.gd)          조립 지점: 모든 시스템의 setup(
 | --- | --- |
 | `WorldData` 월드 상태 배열, `WorldGenerator` 시드 → 월드 | `World` 타일맵 반영, 채집, 탐험 |
 | `Equipment` 착용·가방·스킬바·쿨타임 | `Player` 이동·조준·공격·스킬 입력 |
-| `Loot` 상자 보상 추첨, `MapState` 지도 색 | `Kingdom`, `Building`, `Core` |
+| `Loot` 상자 보상 추첨, `MapState` 지도 색, `Melee` 근거리 판정(static) | `Kingdom`, `Building`, `Core` |
 | `Skills` 스킬 효과(static), `Balance`/`*DB` 데이터 | `Enemy`, `Projectile`, `DayNight`, `WaveSpawner` |
 
 새 규칙은 가능한 한 왼쪽 열에 둔다. 왼쪽 열은 `tests/logic_test.gd`에서 오토로드 없이 검사할 수 있다.

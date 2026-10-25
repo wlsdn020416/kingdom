@@ -1,6 +1,7 @@
 class_name ItemDB
 extends RefCounted
 ## 장비 목록. "skill"이 있는 장비만 스킬바(1~4)에 올라간다.
+## 무기: "melee"가 true면 근거리(range 픽셀, arc 각도), 아니면 투사체(speed).
 ## 새 장비는 ITEMS에 한 줄 추가하면 상자에서 나온다. 새 스킬 효과는 Skills.cast()에 추가한다.
 
 ## 슬롯 순서 = 스킬바 정렬 순서 (기획 미정, 임시 규칙)
@@ -11,10 +12,14 @@ const SLOT_NAMES := {
 }
 
 const STARTING_EQUIPMENT := {
-	"weapon": "old_bow", "head": "leather_cap", "charm": "life_charm",
+	"weapon": "rusty_sword", "head": "leather_cap", "charm": "life_charm",
 }
 
 const ITEMS := {
+	"rusty_sword": {
+		"name": "낡은 검", "slot": "weapon",
+		"weapon": {"damage": 15.0, "rate": 2.5, "melee": true, "range": 52.0, "arc": 120.0},
+	},
 	"old_bow": {
 		"name": "낡은 활", "slot": "weapon",
 		"weapon": {"damage": 10.0, "rate": 4.0, "speed": 620.0},
@@ -58,7 +63,10 @@ static func describe(id: String) -> String:
 	var item: Dictionary = ITEMS[id]
 	var parts := PackedStringArray()
 	if item.has("weapon"):
-		parts.append("공격 %s · 초당 %s발" % [_num(item.weapon.damage), _num(item.weapon.rate)])
+		if item.weapon.get("melee", false):
+			parts.append("근거리 공격 %s · 초당 %s회" % [_num(item.weapon.damage), _num(item.weapon.rate)])
+		else:
+			parts.append("원거리 공격 %s · 초당 %s발" % [_num(item.weapon.damage), _num(item.weapon.rate)])
 	if item.has("hp"):
 		parts.append("체력 +%s" % _num(item.hp))
 	if item.has("speed_bonus"):

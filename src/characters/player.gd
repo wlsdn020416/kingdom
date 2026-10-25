@@ -6,6 +6,7 @@ extends CharacterBody2D
 const DASH_SPEED := 950.0
 const DASH_TIME := 0.18
 const LIGHT_RADIUS := 230.0
+const SWING_SHOW_TIME := 0.12  # 근거리 공격 궤적이 보이는 시간
 
 @onready var camera: Camera2D = $Camera
 
@@ -24,6 +25,7 @@ var _shield_time := 0.0
 var _dash_time := 0.0
 var _dash_velocity := Vector2.ZERO
 var _dash_cooldown := 0.0
+var _swing_time := 0.0
 var _respawn_time := 0.0
 var _shake := 0.0
 
@@ -52,6 +54,7 @@ func _physics_process(delta: float) -> void:
 	_shield_time -= delta
 	_fire_cooldown -= delta
 	_dash_cooldown -= delta
+	_swing_time -= delta
 	if _dash_time > 0.0:
 		_dash_time -= delta
 		velocity = _dash_velocity
@@ -161,6 +164,10 @@ func respawn_time_left() -> float:
 func _fire_weapon() -> void:
 	var weapon := equipment.weapon()
 	_fire_cooldown = 1.0 / float(weapon["rate"])
+	if weapon.get("melee", false):
+		Melee.swing(get_tree(), global_position, aim_direction, weapon)
+		_swing_time = SWING_SHOW_TIME
+		return
 	fire({"direction": aim_direction.rotated(randf_range(-0.03, 0.03)), "damage": weapon["damage"], "speed": weapon["speed"]})
 
 
@@ -177,5 +184,9 @@ func _draw() -> void:
 	draw_rect(Rect2(-9, -10, 18, 20), Color("2b5fa8"))
 	draw_rect(Rect2(-6, -14, 12, 9), Color("f0d0a0"))
 	draw_line(Vector2.ZERO, aim_direction * 20.0, Color("e8e0c8"), 3.0)
+	if _swing_time > 0.0:
+		var weapon := equipment.weapon()
+		var half_arc := deg_to_rad(weapon["arc"]) / 2.0
+		draw_arc(Vector2.ZERO, weapon["range"], aim_direction.angle() - half_arc, aim_direction.angle() + half_arc, 16, Color("f4ecd0"), 4.0)
 	if _shield_time > 0.0:
 		draw_arc(Vector2.ZERO, 20.0, 0.0, TAU, 24, Skills.color("shield"), 2.0)

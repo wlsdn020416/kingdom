@@ -35,6 +35,7 @@ func _ready() -> void:
 	_check(main.player.equipment.bag.size() > bag_before or main.kingdom.stock["wood"] > wood_before, "상자 보상 지급")
 
 	await _check_harvest(main)
+	await _check_melee(main)
 
 	main.day_night.skip_to_night()
 	Engine.time_scale = 3.0
@@ -54,18 +55,20 @@ func _ready() -> void:
 	get_tree().quit(1 if _failures > 0 else 0)
 
 
-## 나무 옆에서 투사체를 쏴서 채집이 되는지 확인
-func _check_harvest(main: Main) -> void:
-	var world := main.world
-	var tree_cell := World.NO_CELL
+## 왼쪽 두 칸이 비어 있는 나무 (왼쪽에서 오른쪽으로 공격하기 위해)
+func _find_tree(world: World) -> Vector2i:
 	for radius in range(Balance.TERRITORY_RADIUS + 1, 60):
 		for x in range(-radius, radius + 1):
 			var cell := world.data.core_cell + Vector2i(x, radius)
 			if world.data.get_object(cell) == WorldData.Obj.TREE and world.data.is_walkable(cell + Vector2i.LEFT) and world.data.is_walkable(cell + Vector2i(-2, 0)):
-				tree_cell = cell
-				break
-		if tree_cell != World.NO_CELL:
-			break
+				return cell
+	return World.NO_CELL
+
+
+## 나무 옆에서 투사체를 쏴서 채집이 되는지 확인
+func _check_harvest(main: Main) -> void:
+	var world := main.world
+	var tree_cell := _find_tree(world)
 	if tree_cell == World.NO_CELL:
 		_check(false, "채집 테스트용 나무를 찾지 못함")
 		return
@@ -81,6 +84,34 @@ func _check_harvest(main: Main) -> void:
 	await _frames(5)
 	_check(world.data.get_object(tree_cell) == WorldData.Obj.NONE and main.kingdom.stock["wood"] > wood_before,
 		"투사체로 나무 채집 (나무 %d → %d)" % [wood_before, main.kingdom.stock["wood"]])
+	main.spawner.set_physics_process(true)
+
+
+## 시작 무기(근거리)로 좌클릭하면 앞의 적이 맞고, 휘두르기로 나무도 채집되는지 확인
+func _check_melee(main: Main) -> void:
+	var player := main.player
+	main.spawner.set_physics_process(false)
+	for enemy in get_tree().get_nodes_in_group("enemies"):
+		enemy.queue_free()
+	await _frames(2)
+	var target := Enemy.new().setup("brute", false)
+	target.position = player.global_position + player.aim_direction * 30.0
+	main.get_node("Enemies").add_child(target)
+	await _frames(2)
+	Input.action_press("attack")
+	await _frames(3)
+	Input.action_release("attack")
+	_check(target.hp < target.max_hp, "근거리 기본 공격이 앞의 적에게 맞음 (체력 %d/%d)" % [target.hp, target.max_hp])
+	target.queue_free()
+
+	var world := main.world
+	var tree_cell := _find_tree(world)
+	var wood_before: int = main.kingdom.stock["wood"]
+	for swing in 3:
+		Melee.swing(get_tree(), world.cell_center(tree_cell) - Vector2(40, 0), Vector2.RIGHT, player.equipment.weapon())
+	await _frames(2)
+	_check(tree_cell != World.NO_CELL and world.data.get_object(tree_cell) == WorldData.Obj.NONE and main.kingdom.stock["wood"] > wood_before,
+		"근거리 공격으로 나무 채집")
 	main.spawner.set_physics_process(true)
 
 

@@ -27,6 +27,7 @@ func _test_world_is_deterministic() -> void:
 ## 스킬바: 스킬 있는 장비만, 슬롯 순서대로 빈칸 없이, 최대 4개
 func _test_skill_bar() -> void:
 	var equipment := Equipment.new()
+	_check(equipment.weapon().get("melee", false), "시작 무기는 근거리 무기")
 	_check(Array(equipment.skill_bar()) == ["life_charm"],
 		"시작 장비 스킬바 = 치유 (스킬 없는 장비는 자리 차지 안 함) %s" % [equipment.skill_bar()])
 	for id in ["fire_staff", "bomb_bag", "guardian_armor"]:
@@ -35,7 +36,7 @@ func _test_skill_bar() -> void:
 	_check(Array(equipment.skill_bar()) == ["fire_staff", "bomb_bag", "guardian_armor", "life_charm"],
 		"스킬은 슬롯 순서대로 빈칸 없이 %s" % [equipment.skill_bar()])
 	_check(equipment.hidden_skill_count() == 0, "4개까지는 숨김 없음")
-	_check(equipment.bag.has("old_bow") and not equipment.bag.has("fire_staff"), "교체된 장비는 가방으로")
+	_check(equipment.bag.has("rusty_sword") and not equipment.bag.has("fire_staff"), "교체된 장비는 가방으로")
 	equipment.unequip("weapon")
 	_check(equipment.item_in("weapon") == "fire_staff", "무기는 해제할 수 없음")
 

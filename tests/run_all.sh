@@ -26,6 +26,10 @@ run() {
 	fi
 }
 
+# 새 class_name 파일은 프로젝트를 다시 훑어야 전역 클래스로 등록된다 (에디터를 열지 않은 경우 대비)
+perl -e 'alarm shift; exec @ARGV' 120 "$GODOT" --headless --path . --import > "$LOG_DIR/import.log" 2>&1 \
+	|| { echo "FAIL  IMPORT (로그 $LOG_DIR/import.log)"; exit 1; }
+
 run "CHECK SCRIPTS" 120 res://tests/check_scripts.tscn
 run "LOGIC TEST" 60 --script res://tests/logic_test.gd
 run "SMOKE TEST" 180 res://tests/smoke_test.tscn
