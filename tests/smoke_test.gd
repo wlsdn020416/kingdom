@@ -32,12 +32,13 @@ func _ready() -> void:
 	_check(not main.player.equipment.is_ready("life_charm"), "장착한 치유 부적이 스킬바 1번, 사용 후 쿨타임")
 
 	var bag_before := main.player.equipment.bag.size()
-	var wood_before: int = main.kingdom.stock["wood"]
+	var resources_before := _total_resources(main)
 	Events.chest_opened.emit(main.player.global_position)
-	_check(main.player.equipment.bag.size() > bag_before or main.kingdom.stock["wood"] > wood_before, "상자 보상 지급")
+	_check(main.player.equipment.bag.size() > bag_before or _total_resources(main) > resources_before, "상자 보상 지급")
 
 	await _check_harvest(main)
 	await _check_melee(main)
+	await _check_inventory(main)
 
 	main.day_night.skip_to_night()
 	Engine.time_scale = 3.0
@@ -79,13 +80,13 @@ func _check_harvest(main: Main) -> void:
 	for enemy in get_tree().get_nodes_in_group("enemies"):
 		enemy.queue_free()
 	await _frames(2)
-	var wood_before: int = main.kingdom.stock["wood"]
+	var wood_before := _wood(main)
 	for shot in 5:
 		Projectile.spawn(get_tree(), world.cell_center(tree_cell) - Vector2(56, 0), {"direction": Vector2.RIGHT, "damage": 10.0})
 		await get_tree().create_timer(0.15).timeout
 	await _frames(5)
-	_check(world.data.get_object(tree_cell) == WorldData.Obj.NONE and main.kingdom.stock["wood"] > wood_before,
-		"투사체로 나무 채집 (나무 %d → %d)" % [wood_before, main.kingdom.stock["wood"]])
+	_check(world.data.get_object(tree_cell) == WorldData.Obj.NONE and _wood(main) > wood_before,
+		"투사체로 나무 채집 (나무 %d → %d)" % [wood_before, _wood(main)])
 	main.spawner.set_physics_process(true)
 
 
@@ -108,13 +109,63 @@ func _check_melee(main: Main) -> void:
 
 	var world := main.world
 	var tree_cell := _find_tree(world)
-	var wood_before: int = main.kingdom.stock["wood"]
+	var wood_before := _wood(main)
 	for swing in 3:
 		Melee.swing(get_tree(), world.cell_center(tree_cell) - Vector2(40, 0), Vector2.RIGHT, player.equipment.weapon())
 	await _frames(2)
-	_check(tree_cell != World.NO_CELL and world.data.get_object(tree_cell) == WorldData.Obj.NONE and main.kingdom.stock["wood"] > wood_before,
+	_check(tree_cell != World.NO_CELL and world.data.get_object(tree_cell) == WorldData.Obj.NONE and _wood(main) > wood_before,
 		"근거리 공격으로 나무 채집")
 	main.spawner.set_physics_process(true)
+
+
+## 개인 인벤토리(D-014): 보상은 가방으로, 비용은 가방 먼저, 핵 근처에서 창고로 입고, 죽으면 가방 비움
+func _check_inventory(main: Main) -> void:
+	var player := main.player
+	var kingdom := main.kingdom
+	player.global_position = kingdom.core.global_position + Vector2(0, 9 * Balance.TILE)
+	await _frames(2)
+	player.inventory.clear()
+	var stock_before: Dictionary = kingdom.stock.duplicate()
+	Events.resources_gained.emit({"wood": 3, "stone": 2}, player.global_position)
+	await _frames(2)
+	_check(player.inventory.count("wood") == 3 and kingdom.stock["wood"] == stock_before["wood"],
+		"핵에서 먼 곳의 보상은 개인 인벤토리로 (가방 나무 %d)" % player.inventory.count("wood"))
+
+	var cell := World.NO_CELL
+	for offset in [Vector2i(-2, 9), Vector2i(2, 9), Vector2i(-2, 7), Vector2i(2, 7), Vector2i(0, 11)]:
+		var candidate: Vector2i = kingdom.core_cell() + offset
+		if main.world.data.is_walkable(candidate) and not kingdom.is_occupied(candidate):
+			cell = candidate
+			break
+	var error := kingdom.build(cell, "wood_wall", player.global_position, player.inventory)
+	_check(error == "" and player.inventory.count("wood") == 0 and kingdom.stock["wood"] == stock_before["wood"] - 2,
+		"건설 비용은 가방 먼저, 모자란 만큼 창고에서 (%s, 창고 나무 %d)" % [error, kingdom.stock["wood"]])
+
+	player.global_position = player.spawn_point
+	await _frames(3)
+	_check(player.inventory.is_empty() and kingdom.stock["stone"] == stock_before["stone"] + 2,
+		"핵 근처에 오면 가방 자원이 창고로 자동 입고")
+
+	player.global_position = kingdom.core.global_position + Vector2(0, 9 * Balance.TILE)
+	player.inventory.add({"gold": 5})
+	# 직전 피격·대시 무적이 남아 있을 수 있어 풀릴 때까지 시도한다
+	for attempt in 120:
+		player.take_damage(999999.0)
+		if player.is_dead:
+			break
+		await _frames(1)
+	_check(player.is_dead and player.inventory.is_empty(), "죽으면 가방 자원이 모두 사라짐 (사망 %s, 가방 %s)" % [player.is_dead, player.inventory.amounts()])
+
+
+func _wood(main: Main) -> int:
+	return main.kingdom.stock["wood"] + main.player.inventory.count("wood")
+
+
+func _total_resources(main: Main) -> int:
+	var total := 0
+	for kind in main.kingdom.stock:
+		total += main.kingdom.stock[kind] + main.player.inventory.count(kind)
+	return total
 
 
 func _check(ok: bool, label: String) -> void:

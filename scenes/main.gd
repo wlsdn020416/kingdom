@@ -39,6 +39,10 @@ func _ready() -> void:
 
 func _physics_process(_delta: float) -> void:
 	world.reveal(player.global_position)
+	if not player.is_dead:
+		var moved := kingdom.deposit(player.inventory, player.global_position)
+		if not moved.is_empty():
+			Fx.float_text(get_tree(), kingdom.core.global_position + Vector2(0, -40), "창고 " + Balance.format_gain(moved), Color("ffe08a"))
 
 
 func _process(_delta: float) -> void:
@@ -61,7 +65,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		if chest != World.NO_CELL:
 			world.open_chest(chest)
 	elif event.is_action_pressed("repair"):
-		var error := kingdom.repair(player.global_position)
+		var error := kingdom.repair(player.global_position, player.inventory)
 		if error != "":
 			Events.message.emit(error)
 	elif event.is_action_pressed("skip_night"):
@@ -79,8 +83,18 @@ func _close_overlays() -> void:
 	hud.close_big_map()
 
 
+## 멀티플레이에서는 보상을 받은 플레이어를 신호에 실어야 한다. 지금은 1인이라 로컬 플레이어.
 func _on_resources_gained(amounts: Dictionary, at: Vector2) -> void:
-	Fx.float_text(get_tree(), at, Balance.format_gain(amounts), Color("ffe08a"))
+	var leftover := player.inventory.add(amounts)
+	var kept := amounts.duplicate()
+	for kind in leftover:
+		kept[kind] -= leftover[kind]
+		if kept[kind] <= 0:
+			kept.erase(kind)
+	if not kept.is_empty():
+		Fx.float_text(get_tree(), at, Balance.format_gain(kept), Color("ffe08a"))
+	if not leftover.is_empty():
+		Events.message.emit("인벤토리가 가득 찼습니다. 왕국 핵 근처로 가져가세요")
 
 
 func _on_chest_opened(at: Vector2) -> void:

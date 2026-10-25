@@ -84,7 +84,10 @@ func _process(_delta: float) -> void:
 	else:
 		_set_bar(_hp_bar, player.hp, max_hp, "체력 %d / %d" % [ceili(player.hp), max_hp])
 	var stock := _main.kingdom.stock
-	_stock_label.text = "나무 %d    돌 %d    금 %d" % [stock["wood"], stock["stone"], stock["gold"]]
+	var bag := player.inventory
+	_stock_label.text = "창고  나무 %d   돌 %d   금 %d\n가방  나무 %d   돌 %d   금 %d   (%d/%d칸)" % [
+		stock["wood"], stock["stone"], stock["gold"],
+		bag.count("wood"), bag.count("stone"), bag.count("gold"), bag.used_slots(), Balance.INVENTORY_SLOTS]
 	var terrain := _main.world.data.get_terrain(_main.world.cell_at(player.global_position))
 	_info_label.text = "%s · 처치 %d" % [WorldData.TERRAIN_NAMES[terrain], _main.kills]
 

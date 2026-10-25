@@ -1,6 +1,7 @@
 class_name Kingdom
 extends Node2D
-## 왕국 운영: 공용 자원, 건물, 핵 수리.
+## 왕국 운영: 공용 자원(창고), 건물, 핵 수리.
+## 비용은 지불하는 플레이어의 개인 인벤토리에서 먼저, 모자라면 공용 창고에서 낸다 (D-014).
 ## 멀티플레이를 붙이면 이 상태(stock, buildings, core.hp)를 호스트가 소유하고 동기화한다.
 
 @onready var core: Core = $Core
@@ -13,7 +14,6 @@ var buildings := {}  # Vector2i -> Building
 func setup(target_world: World) -> void:
 	world = target_world
 	core.global_position = world.cell_center(world.data.core_cell)
-	Events.resources_gained.connect(add_resources)
 	queue_redraw()
 
 
@@ -34,25 +34,40 @@ func is_occupied(cell: Vector2i) -> bool:
 	return buildings.has(cell) or is_core_cell(cell)
 
 
-func can_afford(cost: Dictionary) -> bool:
+## payer가 null이면 공용 창고만 본다
+func can_afford(cost: Dictionary, payer: Inventory = null) -> bool:
 	for kind in cost:
-		if stock.get(kind, 0) < cost[kind]:
+		var held := payer.count(kind) if payer != null else 0
+		if held + stock.get(kind, 0) < cost[kind]:
 			return false
 	return true
 
 
-func add_resources(amounts: Dictionary, _at := Vector2.ZERO) -> void:
+func add_resources(amounts: Dictionary) -> void:
 	for kind in amounts:
 		stock[kind] = stock.get(kind, 0) + amounts[kind]
 
 
-func _spend(cost: Dictionary) -> void:
+## 핵 근처에 있으면 개인 자원을 전부 공용 창고로 옮기고 옮긴 양을 돌려준다
+func deposit(inventory: Inventory, carrier_position: Vector2) -> Dictionary:
+	if inventory.is_empty() or carrier_position.distance_to(core.global_position) > Balance.DEPOSIT_RANGE:
+		return {}
+	var moved := inventory.amounts()
+	inventory.clear()
+	add_resources(moved)
+	return moved
+
+
+func _spend(cost: Dictionary, payer: Inventory) -> void:
 	for kind in cost:
-		stock[kind] -= cost[kind]
+		var remaining: int = cost[kind]
+		if payer != null:
+			remaining -= payer.take(kind, remaining)
+		stock[kind] -= remaining
 
 
 ## 성공하면 "", 실패하면 이유를 돌려준다
-func build(cell: Vector2i, type_id: String, builder_position: Vector2) -> String:
+func build(cell: Vector2i, type_id: String, builder_position: Vector2, payer: Inventory = null) -> String:
 	var cost: Dictionary = BuildingDB.TYPES[type_id]["cost"]
 	if not in_territory(cell):
 		return "왕국 영토(점선 원) 안에만 지을 수 있습니다"
@@ -62,9 +77,9 @@ func build(cell: Vector2i, type_id: String, builder_position: Vector2) -> String
 		return "그 자리에는 지을 수 없습니다"
 	if _someone_standing_on(cell):
 		return "누군가 서 있는 자리입니다"
-	if not can_afford(cost):
+	if not can_afford(cost, payer):
 		return "자원이 부족합니다 (%s)" % Balance.format_cost(cost)
-	_spend(cost)
+	_spend(cost, payer)
 	var building := Building.new().setup(type_id, cell)
 	building.position = world.cell_center(cell)
 	building.destroyed.connect(_on_building_destroyed)
@@ -88,14 +103,14 @@ func demolish(cell: Vector2i) -> void:
 
 
 ## 성공하면 "", 실패하면 이유를 돌려준다
-func repair(repairer_position: Vector2) -> String:
+func repair(repairer_position: Vector2, payer: Inventory = null) -> String:
 	if repairer_position.distance_to(core.global_position) > Balance.REPAIR_RANGE:
 		return "왕국 핵 근처에서만 수리할 수 있습니다"
 	if core.hp >= core.max_hp:
 		return "왕국이 멀쩡합니다"
-	if not can_afford(Balance.REPAIR_COST):
+	if not can_afford(Balance.REPAIR_COST, payer):
 		return "수리에는 %s 이(가) 필요합니다" % Balance.format_cost(Balance.REPAIR_COST)
-	_spend(Balance.REPAIR_COST)
+	_spend(Balance.REPAIR_COST, payer)
 	core.repair(Balance.REPAIR_AMOUNT)
 	Fx.float_text(get_tree(), core.global_position + Vector2(0, -40), "+%d" % Balance.REPAIR_AMOUNT, Color("6fcf6f"))
 	return ""

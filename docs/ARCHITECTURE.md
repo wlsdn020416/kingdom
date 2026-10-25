@@ -63,7 +63,7 @@ Main (Node2D, scenes/main.gd)          조립 지점: 모든 시스템의 setup(
 
 | 신호 | 보내는 곳 | 받는 곳 |
 | --- | --- | --- |
-| `resources_gained` | World(채집), Main(상자·처치 보상) | Kingdom(자원 추가), Main(떠오르는 글자) |
+| `resources_gained` | World(채집), Main(상자·처치 보상) | Main(플레이어 `Inventory`에 추가, 떠오르는 글자). 창고 입고는 `Kingdom.deposit()` (D-014) |
 | `chest_opened` | World | Main(보상 추첨) |
 | `map_cells_changed` | World, Kingdom | MapState |
 | `enemy_killed` | Enemy | Main(처치 수·금 보상) |
@@ -79,7 +79,7 @@ Main (Node2D, scenes/main.gd)          조립 지점: 모든 시스템의 setup(
 | 노드 없음 (테스트 쉬움) | 노드 (생명주기·그리기·물리) |
 | --- | --- |
 | `WorldData` 월드 상태 배열, `WorldGenerator` 시드 → 월드 | `World` 타일맵 반영, 채집, 탐험 |
-| `Equipment` 착용·가방·스킬바·쿨타임 | `Player` 이동·조준·공격·스킬 입력 |
+| `Equipment` 착용·가방·스킬바·쿨타임, `Inventory` 개인 자원·용량 | `Player` 이동·조준·공격·스킬 입력 |
 | `Loot` 상자 보상 추첨, `MapState` 지도 색, `Melee` 근거리 판정(static) | `Kingdom`, `Building`, `Core` |
 | `Skills` 스킬 효과(static), `Balance`/`*DB` 데이터 | `Enemy`, `Projectile`, `DayNight`, `WaveSpawner` |
 

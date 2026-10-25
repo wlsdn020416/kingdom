@@ -10,6 +10,7 @@ func _initialize() -> void:
 	_test_world_is_deterministic()
 	_test_skill_bar()
 	_test_cooldown()
+	_test_inventory()
 	print("LOGIC TEST %s (실패 %d)" % ["PASS" if _failures == 0 else "FAIL", _failures])
 	quit(1 if _failures > 0 else 0)
 
@@ -49,6 +50,22 @@ func _test_cooldown() -> void:
 	_check(equipment.is_ready("life_charm"), "쿨타임만큼 지나면 다시 사용 가능")
 	_check(not ItemDB.ITEMS.values().any(func(item: Dictionary) -> bool: return item.get("skill", {}).get("id") == "dash"),
 		"대시는 장비 스킬이 아님 (기본 능력)")
+
+
+
+## 개인 인벤토리: 칸 수와 칸당 개수 제한, 넘친 양은 돌려줌
+func _test_inventory() -> void:
+	var inventory := Inventory.new()
+	var leftover := inventory.add({"wood": Balance.STACK_SIZE + 1})
+	_check(leftover.is_empty() and inventory.used_slots() == 2, "칸당 %d개, 넘치면 다음 칸 (%d칸)" % [Balance.STACK_SIZE, inventory.used_slots()])
+	var capacity := Balance.INVENTORY_SLOTS * Balance.STACK_SIZE
+	leftover = inventory.add({"stone": capacity})
+	var expected_stone := (Balance.INVENTORY_SLOTS - 2) * Balance.STACK_SIZE
+	_check(inventory.count("stone") == expected_stone and leftover.get("stone", 0) == capacity - expected_stone,
+		"가득 차면 못 담은 양을 돌려줌 (돌 %d, 남음 %s)" % [inventory.count("stone"), leftover])
+	_check(inventory.add({"wood": Balance.STACK_SIZE - 1}).is_empty(), "덜 찬 칸에는 같은 자원을 더 담을 수 있음")
+	_check(not inventory.add({"gold": 1}).is_empty(), "빈칸이 없으면 새 자원은 못 담음")
+	_check(inventory.take("wood", 9999) == Balance.STACK_SIZE * 2 and inventory.count("wood") == 0, "꺼낼 때는 가진 만큼만")
 
 
 func _check(ok: bool, label: String) -> void:

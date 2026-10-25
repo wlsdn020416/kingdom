@@ -15,6 +15,11 @@ const CORE_MAX_HP := 1000.0
 const REPAIR_COST := {"wood": 10, "stone": 5}
 const REPAIR_AMOUNT := 80.0
 const REPAIR_RANGE := 4.0 * TILE
+const DEPOSIT_RANGE := 4.0 * TILE  # 핵 중심에서 이 안에 들어오면 개인 자원이 공용 창고로 (D-014)
+
+# 개인 인벤토리 (D-014, 수치 임시)
+const INVENTORY_SLOTS := 8
+const STACK_SIZE := 50  # 칸 하나에 같은 자원 최대 개수
 
 # 시간 (초)
 const DAY_LENGTH := 75.0

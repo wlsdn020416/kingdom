@@ -36,7 +36,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 			return
 	if event.is_action_pressed("attack"):
-		var error := _kingdom.build(_hovered_cell(), selected_type(), _player.global_position)
+		var error := _kingdom.build(_hovered_cell(), selected_type(), _player.global_position, _player.inventory)
 		if error != "":
 			Events.message.emit(error)
 		get_viewport().set_input_as_handled()

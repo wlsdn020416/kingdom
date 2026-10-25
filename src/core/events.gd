@@ -5,7 +5,7 @@ extends Node
 
 ## 화면 위쪽 알림
 signal message(text: String)
-## 채집·상자·처치 보상. 왕국 공용 자원에 더해진다. 예: {"wood": 3}
+## 채집·상자·처치 보상. 플레이어 개인 인벤토리에 들어간다(D-014). 예: {"wood": 3}
 signal resources_gained(amounts: Dictionary, at: Vector2)
 signal chest_opened(at: Vector2)
 ## 탐험·채집·건설로 지도 색이 바뀐 칸들 (Array of Vector2i)

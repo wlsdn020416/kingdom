@@ -73,7 +73,7 @@ func _draw_build_bar() -> void:
 		var rect := Rect2(start + Vector2(i * (BUILD_SLOT_SIZE.x + GAP), 0), BUILD_SLOT_SIZE)
 		_draw_slot(rect, i == _build_mode.selected)
 		draw_string(font, rect.position + Vector2(0, 22), "%d %s" % [i + 1, info["name"]], HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, 13, UiKit.TEXT)
-		var cost_color := UiKit.MUTED if _kingdom.can_afford(info["cost"]) else UiKit.DANGER
+		var cost_color := UiKit.MUTED if _kingdom.can_afford(info["cost"], _player.inventory) else UiKit.DANGER
 		draw_string(font, rect.position + Vector2(0, 42), Balance.format_cost(info["cost"]), HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, 11, cost_color)
 	draw_string(font, Vector2(0, -8), "건설 모드 · 좌클릭 설치 · 우클릭 철거(반값 환불) · B로 종료", HORIZONTAL_ALIGNMENT_CENTER, size.x, 12, UiKit.ACCENT)
 
