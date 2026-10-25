@@ -21,14 +21,14 @@
 | `scenes/` | 진입점과 메뉴 씬. `title.tscn`(시작 화면), `main.tscn`(한 판, 시스템 조립) | `main.gd`가 조립 지점(composition root) |
 | `src/core/` | 전역 시스템: `Events`·`Session` 오토로드, 입력 배치, 충돌 레이어, 임시 이펙트, 공용 체력바 그리기(`HealthBarArt`), 주입받은 효과음 재생(`SoundEffects`) | 게임 규칙을 넣지 않는다 |
 | `src/world/` | 월드 데이터·생성·타일맵·색 | `WorldData`, `WorldGenerator`는 노드 없음 |
-| `src/characters/` | 플레이어, 장비(`Equipment`), 개인 자원(`Inventory`), 경험치·패시브(`Progression`) | |
-| `src/combat/` | 투사체, 장비 스킬 효과, 로컬·원격 공용 무기 모션(`WeaponVisual`), 일회성 명중·폭발 그림(`CombatEffect`) | |
+| `src/characters/` | 플레이어, 장비(`Equipment`), 착용 외형(`EquipmentVisual`), 개인 자원(`Inventory`), 경험치·패시브(`Progression`) | |
+| `src/combat/` | 투사체, 장비 스킬 효과, 로컬·원격 공용 무기 모션(`WeaponVisual`), 일회성 명중·폭발·패시브 발동 그림(`CombatEffect`) | |
 | `src/enemies/` | 적과 AI | |
 | `src/kingdom/` | 왕국 핵, 건물, 건설 모드, 공용 자원 | |
 | `src/gameplay/` | 낮/밤, 웨이브, 상자 보상, 공유 지도 상태, 핑 | |
 | `src/multiplayer/` | 네트워크 연결과 동기화: Steam 연결(`SteamService`), 접속·명단(`NetSession`, 둘 다 `Session`이 자식으로 소유), 게임 씬 동기화(`PlayerSync`·`RemotePlayer` 플레이어, `CombatSync`·`EnemyPuppet` 적·시간·핵·효과음, `WorldSync` 나무·바위·상자, `KingdomSync` 창고·건물·장비 상자·제작대, `MapSync` 탐험 칸·핑, `MeetingSync` 전략회의) | RPC는 이 폴더에만 (D-017) |
 | `addons/godotsteam/` | GodotSteam GDExtension (외부, MIT). macOS·Win64·Linux64 라이브러리만 포함 | 직접 고치지 않는다. 버전 교체는 D-016 절차 |
-| `src/ui/` | HUD, 스킬바, 건설 메뉴, 지도, 마네킹형 장비·소지품 창, 장비 상자 창, 제작대 창, 순간이동 탑 창, 보스 체력바·침공 예고(`ThreatBanner`), 패시브 창, 전략회의, 멸망 화면, 공용 UI 생성 함수(`UiKit`), 방사형 패시브(`PassiveTree`·`PassiveNode`), 메뉴·패시브 테마(`MenuArt`) | |
+| `src/ui/` | HUD, 스킬바, 건설 도감(`BuildMenu`·`BuildCard`·`BuildPreview`), 지도, 마네킹형 장비·소지품 창, 장비 상자 창, 제작대 창, 순간이동 탑 창, 보스 체력바·침공 예고(`ThreatBanner`), 패시브 창, 전략회의, 멸망 화면, 공용 UI 생성 함수(`UiKit`), 방사형 패시브(`PassiveTree`·`PassiveNode`), 시작·패시브·건설 테마(`MenuArt`) | |
 | `data/` | 밸런스 수치와 아이템·적·건물·레시피·패시브 정의 | 숫자 조정은 여기서만 |
 | `assets/` | 이미지·오디오·폰트. `branding/`(로고, 게임 아이콘), `fonts/`(Kingdom Dot 파생 글꼴·OFL·원본), `audio/music/`(메뉴 BGM·생성 원본·편집 기록), `characters/`(캐릭터 원본·시트, D-012), `kingdom/`(성·건설물 원본·PNG), `world/`(바닥 타일·생성물 원본·PNG), `combat/`(무기·공격 이펙트 원본·PNG), `ui/`(체력바·마네킹·슬롯·재료 아이콘 원본·PNG), `enemies/`(적 원본·시트), `audio/sfx/`(기본 효과음 WAV·생성 원본·목록·미리듣기) | 나머지 스프라이트는 M3(픽셀아트)에서 기능별 하위 폴더로 추가 |
 | `tests/` | 자동 검사(`run_all.sh`로 전부 실행) | `docs/TESTING.md` |

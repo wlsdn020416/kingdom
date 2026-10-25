@@ -45,7 +45,7 @@ Main (Node2D, scenes/main.gd)          조립 지점: 모든 시스템의 setup(
 `[이름]`은 노드 그룹. 코드에서 추가되는 그룹: `enemies`(Enemy, 호스트에만), `lights`(Fx.add_light), `player`(RemotePlayer도 들어간다. 그래서 `player` 그룹을 `Player` 타입으로 가정하면 안 된다, D-017).
 `Enemy`, `Building`, `Projectile`, UI 패널은 `.tscn` 없이 코드로 생성한다. 플레이어 몸은 `Player`가 코드로 붙이는 `Sprite2D`(`assets/characters/player.png`, D-012)가, 무기·공격 궤적은 그 뒤에 붙인 `WeaponVisual`이 그린다. Player의 `_draw()`는 보호막 표시만 맡는다. 투사체도 픽셀 시트를 사용하며 나머지 UI는 기존 코드로 그린다.
 
-건설물은 `assets/kingdom/buildings.aseprite`에서 내보낸 `buildings.png`(256×64)를 쓴다. 한 칸 32×64이며 나무벽·돌벽·화살탑·장비 상자·제작대 0~3단계 순서의 8칸이다. `BuildingDB.sprite_column`은 기본 칸, `sprite_top`은 체력바·메뉴 아이콘용 최상단이다. `Building.sprite_region()`이 제작대 단계에 맞는 칸을 선택하며 `draw_art()`를 실제 건물과 `BuildMode`가 공유한다. 그림 위치 `(-16, -48)`로 바닥을 기존 32×32 충돌 칸에 맞춘다. B 메뉴는 같은 원본에서 위쪽 투명 여백만 자른 아이콘을, 설치 미리보기는 반투명 그림과 기존 가능·불가 테두리를 쓴다. 건설·철거·보관·제작·화살탑 판정은 기존 소유 시스템이 유지한다.
+건설물은 `assets/kingdom/buildings_expanded.aseprite`·PNG(1408×384)를 쓴다. 한 칸 64×96, 가로 22개 외형(19종 + 제작대 추가 3단계), 세로 4프레임·0.16초다. `BuildingDB.sprite_column`·`sprite_top`과 제작대 `sprite_tops`가 메뉴 크롭·단계별 체력바를 정한다. `Building.draw_art()`를 월드·설치 미리보기·도감이 공유한다. 위치 (-32,-80)로 접지하며 실제 충돌은 기존 32×32 한 칸이다. 목재·금속·흑요석·정수 벽, 각 공성 장치, 생활 설비가 고유 실루엣을 쓴다. 색만 입힌 확장 건물 임시 그림은 대체됐고 기존 8칸 원본은 최초 시안으로 보존한다. 불·서리·번개·마법 고리 등은 연출만 반복하며 전투 판정·난수는 소비하지 않는다.
 
 적은 `assets/enemies/enemies.aseprite`(64×64, 32프레임, 종류별 태그·레이어)에서 내보낸 `enemies.png`(256×512)를 쓴다. 4열은 움직임 프레임, 8행은 슬라임·고블린·거인·늑대·전갈·늪 슬라임·화염 정령·보스다. `EnemyDB`의 `sprite_row`가 행, `sprite_top`이 전체 프레임의 최상단 y좌표다. `Enemy._draw()`는 원래 크기로 `(-32, -40)`에 그리고 x 이동 방향으로 좌우 반전한다. 8fps로 걷고 정지 시 0번 칸으로 돌아간다(슬라임·늪 슬라임·불꽃·보스는 정지 중에도 움직임 유지). 체력바는 반전하지 않으며 뿔·불꽃을 포함한 그림 위에 둔다. 피격 시 기존 0.08초 동안 그림을 밝게 하며 AI·원형 충돌·공격·보상은 기존 시스템이 맡는다.
 
@@ -178,3 +178,19 @@ HUD 왼쪽 위는 낮·밤 시계와 성·내 체력 두 줄을 상시 표시한
 `Title`은 `MenuMusic` AudioStreamPlayer를 직접 소유한다. `SoundDB.TITLE_MUSIC`의 OGG 스트림을 복제해 반복하며 목표 음량·페이드 시간은 같은 데이터 파일에 있다. 팝업은 재생기를 만들지 않으며 씬 종료 시 함께 해제된다. 음악은 오토로드나 RPC로 공유하지 않는다. `assets/audio/music/`에 게임용 약 74초 루프와 생성 원본·편집 기록을 보관한다.
 
 `assets/fonts/kingdom_dot.ttf`는 Galmuri11(OFL 1.1) 기반 파생 글꼴이며 한글 11,172자를 보존하고 고정폭 숫자·왕관/검/방패 등을 새로 그렸다. 프로젝트의 `gui/theme/custom_font`가 전체 Control UI에 적용하고 `MenuArt.theme`와 직접 그리는 `ActionBar`도 `UiKit.GAME_FONT`를 쓴다. 원본·라이선스는 같은 폴더에, 개발용 재현 도구는 tools/build_kingdom_font.py에 있다.
+
+### 건설 도감·전체 장비 그래픽 (2026-10-26)
+
+`BuildMenu`는 MenuArt 테마의 1232×672 도감을 창에 맞춰 축소한다. 세 분류의 `BuildCard`를 선택하면 `BuildPreview`와 오른쪽 설명·체력·기본 공격 수치·재료 필요/보유·해금 조건을 갱신한다. 잠긴 카드도 상세 확인 가능, 설치 모드 진입은 불가다. 자원 부족 때는 미리보기 가능하며 실제 지불·검증은 기존 Kingdom 명령에 남는다. 가방+창고 수량과 테크를 열려 있는 동안 0.25초마다 읽는다. 신규 그룹·오토로드는 없다.
+
+`ItemArtDB`는 assets/ui/equipment_items의 48×48·5열×3행 아이콘 15종과 재료 아이콘을 공유한다. 무기 5종·폭탄은 기존 무기 대기 그림에서 같은 픽셀을 가져왔고 방패·모자·투구·갑옷·신발·부적·뿔피리는 새 그림이다. 장비창·제작·상자가 같은 아이콘을 쓰며 상자는 고정 높이 스크롤과 호버 상세를 제공한다. 석탄·송진·보스 정수는 construction_materials에 추가했다.
+
+`EquipmentVisual`은 몸 Sprite2D의 자식으로 비무기 10종의 24×24·12자세(정면/뒷면/측면 × 걷기4) 오버레이를 그린다. 몸의 반동·숨김을 상속하고 좌우 반전은 같은 상태로 적용한다. Player의 Equipment.changed가 읽기 전용 외형을 갱신한다. PlayerSync가 기존 위치/무기 상태에 직렬화 가능한 장착 ID 사전을 추가해 RemotePlayer도 같은 그림을 쓴다. ID·슬롯을 검사하며 능력치나 피해를 변경하지 않는다. RPC는 계속 src/multiplayer에만 있다.
+
+### K 패시브 발동 연출 (2026-10-26)
+
+`PassiveEffectDB`는 패시브55종의 연출 분류와 assets/combat/passive_effects.aseprite·PNG(128×128, 14종×8프레임)를 정의한다. `CombatEffect`가 기존 공격 효과와 같은 fx_layer에 표시하고 수명 뒤 제거한다. K에서 배우기 성공 시 PassiveNode가 습득 파동을 그린다. 상시 수치 노드는 이 습득 표시를 사용하며 별도의 액티브 스킬로 바꾸지 않는다.
+
+실제 발동은 원래 상태 소유 코드의 성공 지점에 연결한다: Player의 회오리 횟수·마무리/광전사·다중 사격·대시 강화·회복/재생·피해 경감/최후의 저항·복귀, Melee/Projectile의 강화 명중·관통/불씨, World의 광역 채집, Main의 풍요/약초/새벽/보물, Kingdom/Building의 할인·강화 건설/해체·가시 반사·자가 보수·수리/요새화. 긴 칼날의 검 궤적도 실제 사거리 배율을 따른다. 그래픽은 피해·회복·드롭·난수를 다시 계산하지 않는다.
+
+로컬 캐릭터 연출은 Player.show_passive가 동일 계열 0.6초 간격으로 만들고 PlayerSync의 전용 외형 RPC로 다른 화면에만 보낸다. ID/위치/범위/유한값을 검사한다. 호스트가 확정하는 월드 연출은 기존 Events.combat_effect_requested→CombatSync 경로를 사용한다. 두 경로는 각각 캐릭터 시전과 월드 결과를 맡으며 같은 결과를 재실행하지 않는다. 동시에 보이는 패시브 효과는 fx_layer 자식 수 48개를 기준으로 제한한다. 신규 그룹·오토로드 없음.
