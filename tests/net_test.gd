@@ -122,11 +122,18 @@ class Runner extends Node:
 		var expected_item := "cloth_shoes" if role == "host" else "iron_helm"
 		await _until(func() -> bool: return remote.equipment_visual._items.get(expected_slot) == expected_item, deadline)
 		_check(remote.equipment_visual._items.get(expected_slot) == expected_item, "상대가 착용한 장비 외형이 같은 시트로 전달됨")
-		main.player.show_passive("regeneration")
 		var seen_passive := func() -> bool:
+			if not is_instance_valid(remote):
+				return false
 			var layer := get_tree().get_first_node_in_group("fx_layer")
 			return layer.get_children().any(func(node: Node) -> bool: return node is CombatEffect and node.effect_id == "passive_heal" and node.global_position.distance_to(remote.global_position) < Balance.TILE)
-		await _until(seen_passive, deadline)
+		# 연출 수명이 0.7초라 두 화면의 검사 시점이 어긋나면 놓친다. 양쪽 모두 보낸 뒤 확인한다.
+		for i in 5:
+			main.player.show_passive("regeneration")
+			await get_tree().create_timer(0.25).timeout
+			if seen_passive.call():
+				break
+			await get_tree().create_timer(0.45).timeout
 		_check(seen_passive.call(), "상대의 K 패시브 연출이 판정 없이 표시됨")
 
 	## 참가자 옆에 늑대를 만들고 참가자의 공격으로 죽는지 본다. 그다음 적 생성을 끄고, 핵에 피해를 주고, 밤으로 넘긴다.
