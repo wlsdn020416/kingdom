@@ -40,6 +40,7 @@ func _ready() -> void:
 	await _check_melee(main)
 	await _check_build_menu(main)
 	await _check_storage(main)
+	await _check_workbench(main)
 	await _check_inventory(main)
 
 	main.day_night.skip_to_night()
@@ -200,6 +201,8 @@ func _check_storage(main: Main) -> void:
 	_check(error == "" and kingdom.find_storage_near(player.global_position) == cell, "장비 상자 건설 %s" % error)
 	if error != "":
 		return
+	# 앞의 상자 보상이 무작위로 같은 장비를 넣었을 수 있어 가방을 비우고 시작한다
+	player.equipment.lose_bag()
 	player.equipment.add_to_bag("chain_mail")
 	error = kingdom.store_item(cell, player.equipment, "chain_mail", player.global_position)
 	var building: Building = kingdom.buildings[cell]
@@ -221,6 +224,53 @@ func _check_storage(main: Main) -> void:
 	error = kingdom.take_item(cell, player.equipment, "chain_mail", player.global_position)
 	_check(error == "" and building.stored.is_empty() and player.equipment.bag.has("chain_mail"), "장비 상자에서 가방으로 꺼냄 %s" % error)
 	_check(kingdom.demolish(cell) == "" and not kingdom.buildings.has(cell), "빈 장비 상자는 철거 가능")
+
+
+## 제작대(D-014): 하나만, 공개된 레시피·단계 조건으로 제작, 업그레이드, 단계 오른 제작대는 철거 불가
+func _check_workbench(main: Main) -> void:
+	var player := main.player
+	var kingdom := main.kingdom
+	player.global_position = player.spawn_point
+	player.equipment.lose_bag()
+	await _frames(2)
+	kingdom.add_resources({"wood": 100, "stone": 100})
+	var cells: Array[Vector2i] = []
+	for offset in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(1, 1), Vector2i(-1, 1)]:
+		var candidate: Vector2i = main.world.cell_at(player.spawn_point) + offset
+		if main.world.data.is_walkable(candidate) and not kingdom.is_occupied(candidate):
+			cells.append(candidate)
+	var error := kingdom.build(cells[0], "workbench", player.global_position, player.inventory)
+	_check(error == "" and kingdom.workbench_tier() == 0, "제작대 건설, 0단계 %s" % error)
+	_check(kingdom.build(cells[1], "workbench", player.global_position, player.inventory) != "", "제작대는 하나만 지을 수 있음")
+
+	_check(kingdom.craft("old_bow", player.global_position, player.inventory, player.equipment) == "" and player.equipment.bag.has("old_bow"),
+		"0단계 레시피(낡은 활) 제작 → 가방")
+	_check(kingdom.craft("old_bow", player.global_position + Vector2(0, 10 * Balance.TILE), player.inventory, player.equipment) != "",
+		"제작대에서 멀면 제작 불가")
+	kingdom.known_materials.erase("gold")
+	_check(kingdom.craft("iron_helm", player.global_position, player.inventory, player.equipment) == "아직 모르는 레시피입니다",
+		"금을 얻기 전에는 철 투구 레시피를 모름")
+	var revealed := kingdom.discover({"gold": 1})
+	_check(revealed.has("iron_helm"), "금을 처음 얻으면 철 투구 레시피 공개 %s" % [revealed])
+	_check(kingdom.craft("iron_helm", player.global_position, player.inventory, player.equipment).contains("1단계"), "단계가 모자라면 제작 불가")
+
+	kingdom.add_resources({"gold": 20})
+	error = kingdom.upgrade_workbench(player.global_position, player.inventory)
+	_check(error == "" and kingdom.workbench_tier() == 1, "제작대 1단계 업그레이드 %s" % error)
+	_check(kingdom.craft("iron_helm", player.global_position, player.inventory, player.equipment) == "", "1단계가 되면 철 투구 제작")
+	_check(kingdom.demolish(cells[0]) != "" and kingdom.workbench_tier() == 1, "단계를 올린 제작대는 철거할 수 없음")
+
+	var interact := InputEventAction.new()
+	interact.action = "interact"
+	interact.pressed = true
+	Input.parse_input_event(interact)
+	await _frames(2)
+	_check(main.hud.crafting_panel.visible, "E로 제작대 창이 열림")
+	main.hud.crafting_panel.hide()
+
+	kingdom.buildings[cells[0]].take_damage(99999.0)
+	await _frames(2)
+	_check(kingdom.workbench_tier() == -1, "제작대가 부서지면 단계도 사라짐")
 
 
 func _wood(main: Main) -> int:

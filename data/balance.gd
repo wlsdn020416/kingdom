@@ -15,7 +15,7 @@ const CORE_MAX_HP := 1000.0
 const REPAIR_COST := {"wood": 10, "stone": 5}
 const REPAIR_AMOUNT := 80.0
 const REPAIR_RANGE := 4.0 * TILE
-const STORAGE_REACH := 2.0 * TILE  # 장비 상자를 열 수 있는 거리
+const USE_REACH := 2.0 * TILE  # 장비 상자·제작대를 쓸 수 있는 거리
 const DEPOSIT_RANGE := 4.0 * TILE  # 핵 중심에서 이 안에 들어오면 개인 자원이 공용 창고로 (D-014)
 
 # 개인 인벤토리 (D-014, 수치 임시)

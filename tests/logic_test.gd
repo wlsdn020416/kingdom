@@ -11,6 +11,7 @@ func _initialize() -> void:
 	_test_skill_bar()
 	_test_cooldown()
 	_test_inventory()
+	_test_recipes()
 	print("LOGIC TEST %s (실패 %d)" % ["PASS" if _failures == 0 else "FAIL", _failures])
 	quit(1 if _failures > 0 else 0)
 
@@ -66,6 +67,18 @@ func _test_inventory() -> void:
 	_check(inventory.add({"wood": Balance.STACK_SIZE - 1}).is_empty(), "덜 찬 칸에는 같은 자원을 더 담을 수 있음")
 	_check(not inventory.add({"gold": 1}).is_empty(), "빈칸이 없으면 새 자원은 못 담음")
 	_check(inventory.take("wood", 9999) == Balance.STACK_SIZE * 2 and inventory.count("wood") == 0, "꺼낼 때는 가진 만큼만")
+
+
+
+## 레시피 데이터가 올바르고, 재료를 모두 얻어 봐야 공개되는지
+func _test_recipes() -> void:
+	var broken := RecipeDB.RECIPES.keys().filter(func(id: String) -> bool:
+		var recipe: Dictionary = RecipeDB.RECIPES[id]
+		var unknown_kind: bool = recipe["cost"].keys().any(func(kind: String) -> bool: return not Balance.RESOURCE_NAMES.has(kind))
+		return not ItemDB.ITEMS.has(id) or recipe["tier"] > RecipeDB.max_tier() or unknown_kind)
+	_check(broken.is_empty(), "레시피는 있는 장비·자원만 쓰고 단계가 최고 단계 이하 %s" % [broken])
+	_check(RecipeDB.is_revealed("old_bow", {"wood": true}), "재료(나무)를 알면 활 레시피 공개")
+	_check(not RecipeDB.is_revealed("iron_helm", {"wood": true, "stone": true}), "금을 얻기 전에는 철 투구 레시피 비공개")
 
 
 func _check(ok: bool, label: String) -> void:

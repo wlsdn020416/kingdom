@@ -1,9 +1,10 @@
 class_name BuildingDB
 extends RefCounted
-## 건설 가능한 건물. ORDER 순서대로 건설 모드의 1~4번 키에 배치된다.
+## 건설 가능한 건물. ORDER 순서대로 건설 메뉴(B)에 나온다.
 ## "storage": 장비 상자 칸 수. 죽으면 장비 가방이 사라지므로 예비 장비는 여기에 맡긴다 (D-014).
+## "workbench": 제작대(RecipeDB). "unique": 왕국에 하나만 지을 수 있다.
 
-const ORDER := ["wood_wall", "stone_wall", "arrow_tower", "gear_chest"]
+const ORDER := ["wood_wall", "stone_wall", "arrow_tower", "gear_chest", "workbench"]
 const REFUND_RATE := 0.5
 
 const TYPES := {
@@ -14,4 +15,8 @@ const TYPES := {
 		"tower": {"range": 224.0, "interval": 0.8, "damage": 9.0, "speed": 520.0},
 	},
 	"gear_chest": {"name": "장비 상자", "hp": 100.0, "cost": {"wood": 15}, "color": Color("a0703a"), "storage": 12},
+	"workbench": {
+		"name": "제작대", "hp": 150.0, "cost": {"wood": 20, "stone": 5}, "color": Color("7a5a3a"),
+		"workbench": true, "unique": true,
+	},
 }

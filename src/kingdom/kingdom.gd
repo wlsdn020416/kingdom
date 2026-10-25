@@ -1,19 +1,24 @@
 class_name Kingdom
 extends Node2D
-## 왕국 운영: 공용 자원(창고), 건물, 핵 수리.
+## 왕국 운영: 공용 자원(창고), 건물, 장비 상자, 제작대, 핵 수리.
 ## 비용은 지불하는 플레이어의 개인 인벤토리에서 먼저, 모자라면 공용 창고에서 낸다 (D-014).
-## 멀티플레이를 붙이면 이 상태(stock, buildings, core.hp)를 호스트가 소유하고 동기화한다.
+## 멀티플레이를 붙이면 이 상태(stock, buildings, known_materials, core.hp)를 호스트가 소유하고 동기화한다.
 
 @onready var core: Core = $Core
 
 var world: World
 var stock: Dictionary = Balance.START_STOCK.duplicate()
 var buildings := {}  # Vector2i -> Building
+## 왕국 사람 누구든 한 번이라도 얻어 본 재료. 레시피 공개 조건 (D-014)
+var known_materials := {}  # 자원 id -> true
 
 
 func setup(target_world: World) -> void:
 	world = target_world
 	core.global_position = world.cell_center(world.data.core_cell)
+	for kind: String in stock:
+		if stock[kind] > 0:
+			known_materials[kind] = true
 	queue_redraw()
 
 
@@ -77,6 +82,8 @@ func build(cell: Vector2i, type_id: String, builder_position: Vector2, payer: In
 		return "그 자리에는 지을 수 없습니다"
 	if _someone_standing_on(cell):
 		return "누군가 서 있는 자리입니다"
+	if BuildingDB.TYPES[type_id].get("unique", false) and _find_type(type_id) != World.NO_CELL:
+		return "%s은(는) 하나만 지을 수 있습니다" % BuildingDB.TYPES[type_id]["name"]
 	if not can_afford(cost, payer):
 		return "자원이 부족합니다 (%s)" % Balance.format_cost(cost)
 	_spend(cost, payer)
@@ -96,6 +103,9 @@ func demolish(cell: Vector2i) -> String:
 		return ""
 	if not building.stored.is_empty():
 		return "장비 상자를 비운 뒤에 철거할 수 있습니다"
+	# 우클릭 실수 한 번으로 올린 단계를 잃지 않게 막는다 (임시)
+	if building.tier > 0:
+		return "단계를 올린 제작대는 철거할 수 없습니다"
 	var cost: Dictionary = building.info["cost"]
 	for kind in cost:
 		stock[kind] += floori(cost[kind] * BuildingDB.REFUND_RATE)
@@ -107,15 +117,84 @@ func demolish(cell: Vector2i) -> String:
 
 ## actor_position에서 열 수 있는 가장 가까운 장비 상자 칸. 없으면 World.NO_CELL
 func find_storage_near(actor_position: Vector2) -> Vector2i:
+	return _find_near(actor_position, func(building: Building) -> bool: return building.storage_capacity() > 0)
+
+
+func find_workbench_near(actor_position: Vector2) -> Vector2i:
+	return _find_near(actor_position, func(building: Building) -> bool: return building.is_workbench())
+
+
+## 제작대 단계. 제작대가 없으면 -1
+func workbench_tier() -> int:
+	var cell := _find_type("workbench")
+	return buildings[cell].tier if cell != World.NO_CELL else -1
+
+
+## 새로 얻은 재료를 기록하고, 그 덕분에 새로 공개된 레시피 id를 돌려준다
+func discover(amounts: Dictionary) -> Array[String]:
+	var before := {}
+	for id: String in RecipeDB.RECIPES:
+		before[id] = RecipeDB.is_revealed(id, known_materials)
+	for kind: String in amounts:
+		known_materials[kind] = true
+	var revealed: Array[String] = []
+	for id: String in RecipeDB.RECIPES:
+		if not before[id] and RecipeDB.is_revealed(id, known_materials):
+			revealed.append(id)
+	return revealed
+
+
+## 성공하면 "", 실패하면 이유를 돌려준다
+func upgrade_workbench(actor_position: Vector2, payer: Inventory = null) -> String:
+	var cell := find_workbench_near(actor_position)
+	if cell == World.NO_CELL:
+		return "제작대 근처에서만 할 수 있습니다"
+	var building: Building = buildings[cell]
+	if building.tier >= RecipeDB.max_tier():
+		return "제작대가 이미 최고 단계입니다"
+	var cost: Dictionary = RecipeDB.UPGRADES[building.tier]
+	if not can_afford(cost, payer):
+		return "업그레이드에는 %s 이(가) 필요합니다" % Balance.format_cost(cost)
+	_spend(cost, payer)
+	building.tier += 1
+	building.queue_redraw()
+	return ""
+
+
+## 장비를 만들어 equipment 가방에 넣는다. 성공하면 "", 실패하면 이유를 돌려준다
+func craft(recipe_id: String, actor_position: Vector2, payer: Inventory, equipment: Equipment) -> String:
+	var cell := find_workbench_near(actor_position)
+	if cell == World.NO_CELL:
+		return "제작대 근처에서만 만들 수 있습니다"
+	if not RecipeDB.RECIPES.has(recipe_id) or not RecipeDB.is_revealed(recipe_id, known_materials):
+		return "아직 모르는 레시피입니다"
+	var recipe: Dictionary = RecipeDB.RECIPES[recipe_id]
+	if buildings[cell].tier < recipe["tier"]:
+		return "제작대 %d단계가 필요합니다" % recipe["tier"]
+	if not can_afford(recipe["cost"], payer):
+		return "자원이 부족합니다 (%s)" % Balance.format_cost(recipe["cost"])
+	_spend(recipe["cost"], payer)
+	equipment.add_to_bag(recipe_id)
+	return ""
+
+
+func _find_near(actor_position: Vector2, accepts: Callable) -> Vector2i:
 	var best := World.NO_CELL
-	var best_distance := Balance.STORAGE_REACH
+	var best_distance := Balance.USE_REACH
 	for cell: Vector2i in buildings:
 		var building: Building = buildings[cell]
 		var distance := building.global_position.distance_to(actor_position)
-		if building.storage_capacity() > 0 and distance <= best_distance:
+		if accepts.call(building) and distance <= best_distance:
 			best = cell
 			best_distance = distance
 	return best
+
+
+func _find_type(type_id: String) -> Vector2i:
+	for cell: Vector2i in buildings:
+		if buildings[cell].type_id == type_id:
+			return cell
+	return World.NO_CELL
 
 
 ## 가방의 장비를 장비 상자에 맡긴다. 성공하면 "", 실패하면 이유를 돌려준다
@@ -149,7 +228,7 @@ func _check_storage(cell: Vector2i, actor_position: Vector2) -> String:
 	var building: Building = buildings.get(cell)
 	if building == null or building.storage_capacity() == 0:
 		return "장비 상자가 없습니다"
-	if building.global_position.distance_to(actor_position) > Balance.STORAGE_REACH:
+	if building.global_position.distance_to(actor_position) > Balance.USE_REACH:
 		return "장비 상자에서 너무 멉니다"
 	return ""
 
@@ -179,6 +258,8 @@ func _someone_standing_on(cell: Vector2i) -> bool:
 func _on_building_destroyed(building: Building) -> void:
 	if not building.stored.is_empty():
 		Events.message.emit("장비 상자가 부서져 맡겨 둔 장비 %d개를 잃었습니다" % building.stored.size())
+	if building.is_workbench():
+		Events.message.emit("제작대가 부서졌습니다. 다시 지으면 0단계부터 시작합니다")
 	buildings.erase(building.cell)
 	Events.map_cells_changed.emit([building.cell])
 

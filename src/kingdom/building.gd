@@ -1,7 +1,7 @@
 class_name Building
 extends StaticBody2D
-## 플레이어가 지은 건물 (벽, 화살탑, 장비 상자). 종류별 수치는 BuildingDB.
-## 장비 상자 내용(stored)은 Kingdom의 명령 메서드로만 바꾼다.
+## 플레이어가 지은 건물 (벽, 화살탑, 장비 상자, 제작대). 종류별 수치는 BuildingDB.
+## 장비 상자 내용(stored)과 제작대 단계(tier)는 Kingdom의 명령 메서드로만 바꾼다.
 
 signal destroyed(building: Building)
 
@@ -12,6 +12,7 @@ var info := {}
 var cell := Vector2i.ZERO
 var hp := 1.0
 var stored: Array[String] = []  # 장비 상자에 맡긴 장비 id
+var tier := 0  # 제작대 단계. 부서지면 건물과 함께 사라진다 (D-014)
 var _shot_cooldown := 0.0
 
 
@@ -39,6 +40,10 @@ func _ready() -> void:
 
 func is_tower() -> bool:
 	return info.has("tower")
+
+
+func is_workbench() -> bool:
+	return info.get("workbench", false)
 
 
 func storage_capacity() -> int:
@@ -101,6 +106,13 @@ func _draw() -> void:
 			draw_rect(Rect2(-12, -9, 24, 6), color.lightened(0.15))
 			draw_rect(Rect2(-12, -3, 24, 2), color.darkened(0.35))
 			draw_rect(Rect2(-3, -4, 6, 5), Color("c9c2b0"))
+		"workbench":
+			draw_rect(Rect2(-13, -8, 26, 7), color.lightened(0.2))
+			draw_rect(Rect2(-12, -1, 4, 12), color.darkened(0.3))
+			draw_rect(Rect2(8, -1, 4, 12), color.darkened(0.3))
+			draw_rect(Rect2(-6, -12, 9, 4), Color("9a9ca0"))
+			for i in tier:
+				draw_rect(Rect2(-8 + i * 6, 3, 4, 4), Color("e3b341"))
 		_:
 			draw_rect(Rect2(-half + 3, -half + 3, 26, 26), color)
 			draw_rect(Rect2(-5, -5, 10, 10), Color("5b8fd6"))

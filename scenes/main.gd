@@ -46,7 +46,8 @@ func _physics_process(_delta: float) -> void:
 
 
 func _process(_delta: float) -> void:
-	player.attack_enabled = not (build_mode.active or hud.build_menu.visible or hud.equipment_panel.visible or hud.storage_panel.visible)
+	player.attack_enabled = not (build_mode.active or hud.build_menu.visible or hud.equipment_panel.visible
+		or hud.storage_panel.visible or hud.crafting_panel.visible)
 	player.skills_enabled = not build_mode.active
 
 
@@ -80,6 +81,7 @@ func _close_overlays() -> void:
 	hud.build_menu.hide()
 	hud.equipment_panel.hide()
 	hud.storage_panel.hide()
+	hud.crafting_panel.hide()
 	hud.close_big_map()
 
 
@@ -92,14 +94,21 @@ func _toggle_build_menu() -> void:
 	hud.build_menu.open()
 
 
-## E: 장비 상자 창을 열고 닫거나, 월드의 보물 상자를 연다
+## E: 장비 상자·제작대 창을 열고 닫거나, 월드의 보물 상자를 연다
 func _interact() -> void:
-	if hud.storage_panel.visible:
+	if hud.storage_panel.visible or hud.crafting_panel.visible:
 		hud.storage_panel.hide()
+		hud.crafting_panel.hide()
+		return
+	if player.is_dead:
 		return
 	var storage := kingdom.find_storage_near(player.global_position)
-	if storage != World.NO_CELL and not player.is_dead:
+	if storage != World.NO_CELL:
 		hud.storage_panel.open(storage)
+		return
+	var workbench := kingdom.find_workbench_near(player.global_position)
+	if workbench != World.NO_CELL:
+		hud.crafting_panel.open(workbench)
 		return
 	var chest := world.find_chest_near(player.global_position)
 	if chest != World.NO_CELL:
@@ -116,6 +125,8 @@ func _on_resources_gained(amounts: Dictionary, at: Vector2) -> void:
 			kept.erase(kind)
 	if not kept.is_empty():
 		Fx.float_text(get_tree(), at, Balance.format_gain(kept), Color("ffe08a"))
+		for recipe_id in kingdom.discover(kept):
+			Events.message.emit("새 레시피: %s (제작대)" % ItemDB.ITEMS[recipe_id]["name"])
 	if not leftover.is_empty():
 		Events.message.emit("인벤토리가 가득 찼습니다. 왕국 핵 근처로 가져가세요")
 
