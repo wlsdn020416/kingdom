@@ -22,6 +22,7 @@ func setup(net: NetSession, local_player: Player, remote_parent: Node) -> void:
 	_remote_parent = remote_parent
 	_net.members_changed.connect(_on_members_changed)
 	_local.attack_visual_requested.connect(_send_attack_visual)
+	_local.passive_visual_requested.connect(_send_passive_visual)
 	_local.progression.changed.connect(_send_ranks)
 
 
@@ -90,11 +91,26 @@ func _send_attack_visual(id: String, direction: Vector2) -> void:
 		_attack_visual.rpc(id, direction)
 
 
+func _send_passive_visual(id: String, at: Vector2, radius: float, angle: float) -> void:
+	if _running:
+		_passive_visual.rpc(id, at, radius, angle)
+
+
+@rpc("any_peer", "reliable")
+func _passive_visual(id: String, at: Vector2, radius: float, angle: float) -> void:
+	var actor := remote(multiplayer.get_remote_sender_id())
+	if actor == null or PassiveEffectDB.effect_for(id) == "" or not at.is_finite() or not is_finite(radius) or not is_finite(angle):
+		return
+	if actor.global_position.distance_to(at) > 6.0 * Balance.TILE or radius <= 0.0 or radius > 10.0 * Balance.TILE:
+		return
+	CombatEffect.spawn(get_tree(), PassiveEffectDB.effect_for(id), at, radius / PassiveEffectDB.RADIUS, angle)
+
+
 @rpc("any_peer", "reliable")
 func _attack_visual(id: String, direction: Vector2) -> void:
 	var actor := remote(multiplayer.get_remote_sender_id())
 	if actor != null and WeaponArtDB.WEAPONS.has(id):
-		actor.weapon_visual.attack(id, direction, PassiveDB.value_in(actor.ranks, "sword_sweep"))
+		actor.weapon_visual.attack(id, direction, PassiveDB.value_in(actor.ranks, "sword_sweep"), 1.0 + PassiveDB.value_in(actor.ranks, "blade_reach") / 100.0)
 
 
 func _mark_ready(peer_id: int) -> void:

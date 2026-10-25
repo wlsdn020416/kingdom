@@ -156,6 +156,8 @@ func _select_node(id: String) -> void:
 
 func _learn(id: String) -> void:
 	var error := _progression.learn(id)
+	if error == "":
+		(_tree.buttons[id] as PassiveNode).pulse()
 	if error != "":
 		Events.message.emit(error)
 	Events.ui_sound_requested.emit("error" if error != "" else "level_up")

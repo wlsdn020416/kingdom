@@ -10,6 +10,8 @@ signal attacked(kind: String, data: Dictionary)
 signal sound_requested(id: String, at: Vector2)
 ## 순수 공격 연출. PlayerSync가 다른 사람에게 같은 모션을 보여준다.
 signal attack_visual_requested(id: String, direction: Vector2)
+## 패시브 발동의 위치·범위 연출. 피해·회복 판정을 전송하지 않는다.
+signal passive_visual_requested(id: String, at: Vector2, radius: float, angle: float)
 
 const DASH_SPEED := 950.0
 const DASH_TIME := 0.18
@@ -51,6 +53,7 @@ var _sprite := Sprite2D.new()
 var _walk_time := 0.0
 var weapon_visual := WeaponVisual.new()
 var equipment_visual := EquipmentVisual.new()
+var _last_passive_fx := {}
 
 
 func _ready() -> void:
@@ -141,6 +144,8 @@ func use_skill(slot: int) -> void:
 	if skill.has("amount"):
 		skill["amount"] *= 1.0 + progression.value("field_medic") / 100.0
 	Skills.cast(skill, self)
+	if progression.value("skill_power") > 0.0:
+		show_passive("skill_power")
 	equipment.start_cooldown(bar[slot], 1.0 - progression.value("tactician") / 100.0)
 	var id: String = ItemDB.ITEMS[bar[slot]]["skill"]["id"]
 	if id in ["shotgun", "fireball", "bomb"]:
@@ -185,6 +190,8 @@ func dash() -> void:
 	if afterimage > 0.0:
 		_invuln_time = maxf(_invuln_time, DASH_TIME + afterimage)
 	sound_requested.emit("dash", global_position)
+	if progression.value("windstep") + progression.value("sprint_dash") + progression.value("evasive_dash") > 0.0:
+		show_passive("windstep", global_position, 34.0, direction.angle())
 
 
 func dash_cooldown_left() -> float:
@@ -207,6 +214,8 @@ func teleport_to(at: Vector2) -> void:
 
 func heal(amount: float) -> void:
 	hp = minf(max_hp(), hp + amount)
+	if progression.value("field_medic") > 0.0:
+		show_passive("field_medic")
 	Fx.float_text(get_tree(), global_position, "+%d" % amount, Color("6fcf6f"))
 
 
@@ -219,6 +228,8 @@ func take_damage(amount: float) -> void:
 		return
 	_since_hit = 0.0
 	var reduction := progression.value("iron_skin") + (progression.value("bulwark_aura") if in_territory else 0.0)
+	if reduction > 0.0:
+		show_passive("iron_skin")
 	amount *= maxf(0.1, 1.0 - reduction / 100.0)
 	var last_stand := progression.value("last_stand")
 	if hp - amount <= 0.0 and last_stand > 0.0 and _last_stand_cooldown <= 0.0:
@@ -226,6 +237,7 @@ func take_damage(amount: float) -> void:
 		hp = 1.0
 		_invuln_time = PassiveDB.LAST_STAND_INVULN
 		_last_stand_cooldown = last_stand
+		show_passive("last_stand")
 		Fx.float_text(get_tree(), global_position, "최후의 저항!", Color("ffd060"))
 		return
 	hp -= amount
@@ -262,6 +274,8 @@ func _respawn() -> void:
 	_invuln_time = Balance.RESPAWN_INVULN
 	_sprite.visible = true
 	weapon_visual.show()
+	if progression.value("quick_return") > 0.0:
+		show_passive("quick_return")
 
 
 ## 다른 사람 화면에 보낼 겉모습 (멀티플레이 동기화용)
@@ -280,6 +294,16 @@ func respawn_time_left() -> float:
 
 func _fire_weapon() -> void:
 	var weapon := _boosted_weapon()
+	if weapon.get("arc", 0.0) >= 360.0:
+		show_passive("whirlwind", global_position, weapon["range"])
+	elif weapon.get("emphasis", false):
+		show_passive("combo_finisher", global_position, 28.0, aim_direction.angle())
+	elif hp <= max_hp() * PassiveDB.BERSERK_HP_RATIO and progression.value("berserker") > 0.0:
+		show_passive("berserker")
+	if int(weapon.get("shots", 1)) > 1:
+		show_passive("multishot", global_position + aim_direction * 14.0, 32.0, aim_direction.angle())
+	elif progression.value("overcharge") > 0.0 and weapon.get("family", "") == "staff":
+		show_passive("overcharge")
 	weapon["harvest_radius"] = progression.value("wide_harvest")
 	weapon["hits_world"] = hits_world
 	_show_attack(equipment.item_in("weapon"))
@@ -352,6 +376,21 @@ func _regenerate(delta: float) -> void:
 	var per_second := progression.value("regeneration")
 	if per_second > 0.0 and _since_hit >= PassiveDB.REGEN_DELAY and hp < max_hp():
 		hp = minf(max_hp(), hp + per_second * delta)
+		show_passive("regeneration")
+
+
+## 잦은 회복·연사에도 같은 연출이 겹치지 않게 제한하며 결과용 난수는 쓰지 않는다.
+func show_passive(id: String, at := Vector2.INF, radius := 32.0, angle := 0.0) -> void:
+	var effect := PassiveEffectDB.effect_for(id)
+	if effect == "" or radius <= 0.0:
+		return
+	var now := Time.get_ticks_msec()
+	if now - int(_last_passive_fx.get(effect, -100000)) < PassiveEffectDB.LOCAL_INTERVAL * 1000.0:
+		return
+	_last_passive_fx[effect] = now
+	var point := at if at.is_finite() else global_position
+	CombatEffect.spawn(get_tree(), effect, point, radius / PassiveEffectDB.RADIUS, angle)
+	passive_visual_requested.emit(id, point, radius, angle)
 
 
 func _move_input() -> Vector2:
@@ -380,5 +419,5 @@ func _draw() -> void:
 
 
 func _show_attack(id: String) -> void:
-	weapon_visual.attack(id, aim_direction, progression.value("sword_sweep"))
+	weapon_visual.attack(id, aim_direction, progression.value("sword_sweep"), 1.0 + progression.value("blade_reach") / 100.0)
 	attack_visual_requested.emit(id, aim_direction)

@@ -10,6 +10,7 @@ var passive_id := ""
 var state := State.LOCKED
 var rank_text := "0/1"
 var selected := false
+var learn_pulse := 0.0
 
 
 func setup(id: String) -> void:
@@ -34,3 +35,18 @@ func _draw() -> void:
 	draw_rect(Rect2(12, 41, 32, 13), Color("101b26"))
 	var color := MenuArt.GOLD if state in [State.LEARNED, State.COMPLETE] else MenuArt.MUTED
 	draw_string(get_theme_default_font(), Vector2(12, 51), rank_text, HORIZONTAL_ALIGNMENT_CENTER, 32, 10, color)
+	if learn_pulse > 0.0:
+		var progress := 1.0 - learn_pulse / float(PassiveEffectDB.EFFECTS["passive_learn"]["duration"])
+		draw_texture_rect_region(PassiveEffectDB.TEXTURE, Rect2(-32, -32, 120, 120), PassiveEffectDB.region("passive_learn", progress))
+
+
+func pulse() -> void:
+	learn_pulse = PassiveEffectDB.EFFECTS["passive_learn"]["duration"]
+	set_process(true)
+	queue_redraw()
+
+
+func _process(delta: float) -> void:
+	learn_pulse = maxf(0.0, learn_pulse - delta)
+	set_process(learn_pulse > 0.0)
+	queue_redraw()

@@ -25,6 +25,7 @@ func _ready() -> void:
 	_check_enemy_art(main)
 	_check_building_art(main)
 	_check_item_art(main)
+	await _check_passive_effects(main)
 
 	_check(main.world.data.is_explored(main.world.data.core_cell), "시작 지점 주변이 지도에 탐험됨")
 
@@ -433,6 +434,83 @@ func _check_item_art(main: Main) -> void:
 	remote.apply_state(Vector2.ZERO, Vector2.RIGHT, 5, true, true, false, "old_bow", {"head": "iron_helm", "armor": "flame_armor", "charm": "unknown"})
 	_check(remote.equipment_visual._items.get("head") == "iron_helm" and remote.equipment_visual._items.get("armor") == "flame_armor" and not remote.equipment_visual._items.has("charm"), "원격 캐릭터는 같은 착용 원본을 쓰고 잘못된 장비 ID는 무시")
 	remote.queue_free()
+
+
+func _check_passive_effects(main: Main) -> void:
+	var image := PassiveEffectDB.TEXTURE.get_image()
+	var mapped := true
+	for id: String in PassiveDB.PASSIVES:
+		mapped = mapped and PassiveEffectDB.EFFECTS.has(PassiveEffectDB.effect_for(id))
+	_check(mapped, "K 패시브 55종 모두 습득/발동 연출 분류가 있음")
+	var complete := true
+	var effects: Array[CombatEffect] = []
+	var hp_before := main.player.hp
+	var xp_before := main.player.progression.xp
+	for id: String in PassiveEffectDB.EFFECTS:
+		var first := image.get_region(Rect2i(PassiveEffectDB.region(id, 0.0))).get_data()
+		for frame in PassiveEffectDB.FRAMES:
+			var art := image.get_region(Rect2i(PassiveEffectDB.region(id, float(frame) / PassiveEffectDB.FRAMES)))
+			var bounds := art.get_used_rect()
+			complete = complete and bounds.has_area() and bounds.position.x > 0 and bounds.position.y > 0 and bounds.end.x < 128 and bounds.end.y < 128
+		complete = complete and first != image.get_region(Rect2i(PassiveEffectDB.region(id, 0.99))).get_data()
+		var effect := CombatEffect.spawn(get_tree(), id, main.player.global_position + Vector2(180, 0), 1.0)
+		if effect != null:
+			effects.append(effect)
+	_check(complete and effects.size() == PassiveEffectDB.EFFECTS.size(), "패시브 연출 14종의 8프레임이 존재하고 가장자리 잘림 없이 변화")
+	await get_tree().create_timer(0.85).timeout
+	var expired := true
+	for effect in effects:
+		if is_instance_valid(effect):
+			expired = false
+	_check(expired and main.player.hp == hp_before and main.player.progression.xp == xp_before, "패시브 그림은 수명 뒤 제거되고 체력·경험치를 바꾸지 않음")
+	var actor := Player.new()
+	var camera := Camera2D.new()
+	camera.name = "Camera"
+	camera.enabled = false
+	actor.add_child(camera)
+	main.add_child(actor)
+	actor.set_physics_process(false)
+	actor.hits_world = false
+	actor.global_position = main.player.global_position + Vector2(400, 0)
+	actor.progression.add_xp(1000)
+	for id: String in ["vitality", "regeneration", "last_stand", "swift", "windstep", "sword_mastery", "sword_sweep", "whirlwind"]:
+		actor.progression.learn(id)
+	var seen: Array[String] = []
+	actor.passive_visual_requested.connect(func(id: String, _at: Vector2, _radius: float, _angle: float) -> void: seen.append(id))
+	actor.hp = 50.0
+	actor._since_hit = PassiveDB.REGEN_DELAY
+	actor._regenerate(1.0)
+	_check(seen.has("regeneration") and actor.hp > 50.0, "재생 패시브의 실제 회복에 초록 연출이 연결됨")
+	actor._invuln_time = 0.0
+	actor.hp = 2.0
+	actor.take_damage(9999.0)
+	_check(seen.has("last_stand") and actor.hp == 1.0 and not actor.is_dead, "최후의 저항은 치명타를 버틴 순간 방어 문양 표시")
+	actor.dash()
+	_check(seen.has("windstep"), "배운 대시 패시브가 실제 대시에 바람 궤적 표시")
+	for i in 4:
+		actor._fire_weapon()
+	_check(seen.has("whirlwind"), "회오리 베기는 횟수를 채워 360도 공격이 되는 순간 표시")
+	var world_effects: Array[String] = []
+	var heard_effect := func(id: String, _at: Vector2, _scale: float, _angle: float) -> void: world_effects.append(id)
+	Events.combat_effect_requested.connect(heard_effect)
+	var enemy := Enemy.new().setup("slime", false)
+	enemy.position = actor.position + Vector2(100, 0)
+	main.add_child(enemy)
+	enemy.set_physics_process(false)
+	var shot := Projectile.spawn(get_tree(), actor.global_position, {"direction": Vector2.ZERO, "art": "ember", "splash_radius": 48.0})
+	shot.set_physics_process(false)
+	await _frames(1)
+	shot._splash(enemy)
+	_check(world_effects.has("passive_ember"), "불씨 폭발 패시브의 실제 범위 피해에 화염 고리 표시")
+	world_effects.clear()
+	shot.team = Projectile.Team.TOWER
+	shot._splash(enemy)
+	_check(not world_effects.has("passive_ember"), "기본 대포탑의 범위 공격을 K 패시브 발동으로 표시하지 않음")
+	Events.combat_effect_requested.disconnect(heard_effect)
+	shot.queue_free()
+	enemy.queue_free()
+	actor.queue_free()
+	await _frames(1)
 
 
 ## 모든 적의 그림이 존재하고 움직임·피격 표시가 기존 충돌과 피해 판정을 유지해야 한다.
@@ -1381,7 +1459,7 @@ func _check_passive_graphics() -> void:
 	var before := progression.xp
 	var cost := progression.next_cost("sword_mastery")
 	panel._learn_button.pressed.emit()
-	_check(progression.rank("sword_mastery") == 1 and progression.xp == before - cost and panel._tree.buttons["sword_sweep"].state == PassiveNode.State.AVAILABLE, "배우기 버튼은 학습 명령을 호출하고 다음 노드를 열음")
+	_check(progression.rank("sword_mastery") == 1 and progression.xp == before - cost and panel._tree.buttons["sword_sweep"].state == PassiveNode.State.AVAILABLE and panel._tree.buttons["sword_mastery"].learn_pulse > 0.0, "배우기 버튼은 학습 명령을 호출하고 다음 노드를 열음")
 	while progression.rank("sword_mastery") < PassiveDB.max_rank("sword_mastery"):
 		panel._learn_button.pressed.emit()
 	_check(panel._learn_button.disabled and panel._tree.buttons["sword_mastery"].state == PassiveNode.State.COMPLETE, "최고 단계 노드는 완료 표시하고 추가 학습을 막음")

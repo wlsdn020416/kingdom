@@ -16,6 +16,7 @@ var _body: Sprite2D
 var _remaining := 0.0
 var _duration := 0.0
 var _arc_bonus := 0.0
+var _reach_scale := 1.0
 
 
 func setup(body: Sprite2D) -> void:
@@ -32,12 +33,13 @@ func set_weapon(id: String) -> void:
 	queue_redraw()
 
 
-func attack(id: String, direction: Vector2, arc_bonus := 0.0) -> void:
+func attack(id: String, direction: Vector2, arc_bonus := 0.0, reach_scale := 1.0) -> void:
 	if not WeaponArtDB.WEAPONS.has(id) or not direction.is_finite() or direction.length_squared() < 0.01:
 		return
 	attack_item = id
 	attack_direction = direction.normalized()
 	_arc_bonus = arc_bonus if is_finite(arc_bonus) else 0.0
+	_reach_scale = clampf(reach_scale, 1.0, 3.0) if is_finite(reach_scale) else 1.0
 	_duration = WeaponArtDB.WEAPONS[id]["duration"]
 	_remaining = _duration
 	queue_redraw()
@@ -83,7 +85,7 @@ func _draw() -> void:
 	draw_set_transform(Vector2.ZERO, direction.angle())
 	if slash_visible():
 		var effect := "obsidian_slash" if id == "obsidian_blade" else "steel_slash"
-		var reach: float = ItemDB.ITEMS[id]["weapon"]["range"]
+		var reach: float = ItemDB.ITEMS[id]["weapon"]["range"] * _reach_scale
 		var size := Vector2.ONE * WeaponArtDB.EFFECT_SIZE * reach / WeaponArtDB.SLASH_RADIUS
 		var stretch := slash_stretch()
 		draw_set_transform(direction * reach * (1.0 - stretch.x), direction.angle(), stretch)

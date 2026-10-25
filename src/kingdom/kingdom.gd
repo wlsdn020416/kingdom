@@ -131,6 +131,8 @@ func build(cell: Vector2i, type_id: String, builder_position: Vector2, payer: In
 	building.destroyed.connect(_on_building_destroyed)
 	add_child(building)
 	buildings[cell] = building
+	if perks.get("hp_scale", 1.0) > 1.0 or perks.get("discount", 0.0) > 0.0 or perks.get("regen", 0.0) > 0.0:
+		Events.combat_effect_requested.emit("passive_build", building.global_position, 0.8, 0.0)
 	Events.world_sound_requested.emit("build", building.global_position)
 	Events.map_cells_changed.emit([cell])
 	if info.has("reveal"):
@@ -153,6 +155,8 @@ func demolish(cell: Vector2i, refund_bonus := 0.0) -> String:
 	for kind in cost:
 		stock[kind] += floori(cost[kind] * minf(1.0, BuildingDB.REFUND_RATE + refund_bonus))
 	buildings.erase(cell)
+	if refund_bonus > 0.0:
+		Events.combat_effect_requested.emit("passive_build", world.cell_center(cell), 0.7, 0.0)
 	building.queue_free()
 	Events.world_sound_requested.emit("demolish", world.cell_center(cell))
 	Events.map_cells_changed.emit([cell])
@@ -295,11 +299,14 @@ func repair(repairer_position: Vector2, payer: Inventory = null, perks := {}) ->
 	_spend(cost, payer)
 	var amount: float = Balance.REPAIR_AMOUNT * (1.0 + perks.get("amount_bonus", 0.0))
 	core.repair(amount)
+	if perks.get("amount_bonus", 0.0) > 0.0 or perks.get("discount", 0.0) > 0.0:
+		Events.combat_effect_requested.emit("passive_fortify", core.global_position, 1.0, 0.0)
 	var resonance: float = perks.get("resonance", 0.0)
 	if resonance > 0.0:
 		for building: Building in buildings.values():
 			if in_territory(building.cell):
 				building.heal(building.max_hp * resonance)
+				Events.combat_effect_requested.emit("passive_fortify", building.global_position, 0.65, 0.0)
 	Events.world_sound_requested.emit("repair", core.global_position)
 	Fx.float_text(get_tree(), core.global_position + Vector2(0, -40), "+%d" % amount, Color("6fcf6f"))
 	return ""
@@ -311,7 +318,9 @@ func fortify(ratio: float) -> void:
 		return
 	for building: Building in buildings.values():
 		building.heal(building.max_hp * ratio)
+		Events.combat_effect_requested.emit("passive_fortify", building.global_position, 0.75, 0.0)
 	core.repair(core.max_hp * ratio)
+	Events.combat_effect_requested.emit("passive_fortify", core.global_position, 1.4, 0.0)
 
 
 ## 참가자에게 보낼 상태. 직렬화할 수 있는 값만 담는다 (AGENTS 5절)

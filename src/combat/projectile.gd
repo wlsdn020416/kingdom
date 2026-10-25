@@ -39,6 +39,7 @@ var visual_only := false
 var _elapsed := 0.0
 var _flight_duration := 1.0
 var _already_hit := {}
+var _boosted_hit := false
 var _query := PhysicsShapeQueryParameters2D.new()
 
 
@@ -126,6 +127,7 @@ func _check_hits() -> void:
 
 
 func _on_hit(body: Object) -> void:
+	_boosted_hit = false
 	if body is TileMapLayer:
 		var world := (body as TileMapLayer).get_parent() as World
 		var cell := world.object_cell_near(global_position, radius)
@@ -150,6 +152,7 @@ func _on_hit(body: Object) -> void:
 		if slow_time > 0.0:
 			enemy.slow(slow_factor, slow_time)
 		var dealt := enemy.damage_after_execute(damage, execute_bonus, opener_bonus)
+		_boosted_hit = dealt > damage
 		enemy.take_damage(dealt, source, emphasis or dealt > damage)
 	elif hits_world or body is Player:
 		# 참가자 화면에 따라 그린 적 탄은 내 캐릭터만 맞힌다. 건물·왕국 핵 피해는 호스트의 탄이 정한다 (D-017)
@@ -162,6 +165,8 @@ func _on_hit(body: Object) -> void:
 
 ## 맞힌 적 주변의 다른 적에게 절반 피해 (불씨 폭발)
 func _splash(hit: Enemy) -> void:
+	if not visual_only and hits_world and team == Team.PLAYER and art_id == "ember":
+		Events.combat_effect_requested.emit("passive_ember", hit.global_position, splash_radius / PassiveEffectDB.RADIUS, 0.0)
 	for enemy: Enemy in get_tree().get_nodes_in_group("enemies"):
 		if enemy != hit and enemy.global_position.distance_to(hit.global_position) <= splash_radius + enemy.radius:
 			enemy.take_damage(damage * PassiveDB.EMBER_SPLASH_RATIO, source)
@@ -195,4 +200,8 @@ func _explode() -> void:
 func _show_impact() -> void:
 	if hits_world and not visual_only:
 		var effect := "fire_impact" if art_id in ["ember", "fireball", "enemy_orb"] else "impact"
+		if emphasis or _boosted_hit:
+			effect = "passive_strike"
+		elif pierce and art_id == "arrow":
+			effect = "passive_shot"
 		Events.combat_effect_requested.emit(effect, global_position, 1.0, velocity.angle())

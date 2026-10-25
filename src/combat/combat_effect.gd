@@ -11,10 +11,12 @@ var _elapsed := 0.0
 
 
 static func spawn(tree: SceneTree, id: String, at: Vector2, size := 1.0, angle := 0.0) -> CombatEffect:
-	if not WeaponArtDB.EFFECTS.has(id) or not at.is_finite() or not is_finite(size) or not is_finite(angle):
+	if (not WeaponArtDB.EFFECTS.has(id) and not PassiveEffectDB.EFFECTS.has(id)) or not at.is_finite() or not is_finite(size) or not is_finite(angle):
 		return null
 	var layer := tree.get_first_node_in_group("fx_layer")
 	if layer == null:
+		return null
+	if PassiveEffectDB.EFFECTS.has(id) and layer.get_child_count() >= PassiveEffectDB.MAX_VISIBLE:
 		return null
 	var effect := CombatEffect.new()
 	effect.effect_id = id
@@ -28,12 +30,20 @@ static func spawn(tree: SceneTree, id: String, at: Vector2, size := 1.0, angle :
 
 func _process(delta: float) -> void:
 	_elapsed += delta
-	if _elapsed >= float(WeaponArtDB.EFFECTS[effect_id]["duration"]):
+	if _elapsed >= effect_duration():
 		queue_free()
 	queue_redraw()
 
 
 func _draw() -> void:
+	if PassiveEffectDB.EFFECTS.has(effect_id):
+		var dimensions := Vector2.ONE * PassiveEffectDB.SIZE * display_scale
+		draw_texture_rect_region(PassiveEffectDB.TEXTURE, Rect2(-dimensions / 2.0, dimensions), PassiveEffectDB.region(effect_id, _elapsed / effect_duration()))
+		return
 	var size := Vector2.ONE * WeaponArtDB.EFFECT_SIZE * display_scale
 	var duration: float = WeaponArtDB.EFFECTS[effect_id]["duration"]
 	draw_texture_rect_region(TEXTURE, Rect2(-size / 2.0, size), WeaponArtDB.effect_region(effect_id, _elapsed / duration))
+
+
+func effect_duration() -> float:
+	return PassiveEffectDB.EFFECTS[effect_id]["duration"] if PassiveEffectDB.EFFECTS.has(effect_id) else WeaponArtDB.EFFECTS[effect_id]["duration"]

@@ -22,7 +22,8 @@ static func swing(tree: SceneTree, origin: Vector2, direction: Vector2, weapon: 
 			continue
 		var dealt := enemy.damage_after_execute(weapon["damage"], weapon.get("execute_bonus", 0.0), weapon.get("opener_bonus", 0.0))
 		enemy.take_damage(dealt, weapon.get("source", Enemy.SOURCE_LOCAL), weapon.get("emphasis", false) or dealt > weapon["damage"])
-		Events.combat_effect_requested.emit("impact", enemy.global_position, 1.0, direction.angle())
+		var effect := "passive_strike" if weapon.get("emphasis", false) or dealt > weapon["damage"] else "impact"
+		Events.combat_effect_requested.emit(effect, enemy.global_position, 1.0, direction.angle())
 		enemy.knockback(offset.normalized() * KNOCKBACK)
 	if not weapon.get("hits_world", true):
 		return

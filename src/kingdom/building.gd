@@ -30,6 +30,7 @@ var tier := 0  # 제작대 단계. 부서지면 건물과 함께 사라진다 (D
 var _shot_cooldown := 0.0
 var _art_time := 0.0
 var _art_frame := 0
+var _passive_fx_delay := 0.0
 
 
 ## perks: PassiveDB.build_perks() 결과. 비어 있으면 패시브 없음 (참가자 화면의 건물도 비운 채로 만든다)
@@ -89,6 +90,7 @@ func take_damage(amount: float, attacker: Enemy = null) -> void:
 		return
 	if thorns > 0.0 and attacker != null and is_instance_valid(attacker):
 		attacker.take_damage(amount * thorns, Enemy.SOURCE_TOWER)
+		Events.combat_effect_requested.emit("passive_thorns", attacker.global_position, 0.55, 0.0)
 	hp -= amount
 	Events.world_sound_requested.emit("demolish" if hp <= 0.0 else "hit_armor", global_position)
 	queue_redraw()
@@ -99,8 +101,12 @@ func take_damage(amount: float, attacker: Enemy = null) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	_passive_fx_delay = maxf(0.0, _passive_fx_delay - delta)
 	if regen > 0.0 and hp < max_hp:
 		heal(regen * delta)
+		if _passive_fx_delay <= 0.0:
+			_passive_fx_delay = 1.0
+			Events.combat_effect_requested.emit("passive_fortify", global_position, 0.55, 0.0)
 	if not is_tower():
 		return
 	_shot_cooldown -= delta

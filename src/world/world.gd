@@ -100,6 +100,8 @@ func apply_object_state(cell: Vector2i, hp: float) -> void:
 
 ## 광역 채집 패시브: cell과 그 주변 radius칸 안의 나무·바위·광석에 같은 피해 (상자는 제외)
 func damage_objects_around(cell: Vector2i, amount: float, radius: float, harvester: int) -> void:
+	if radius > 0.0 and data.get_object(cell) in HARVESTABLE:
+		Events.combat_effect_requested.emit("passive_harvest", cell_center(cell), radius * Balance.TILE / PassiveEffectDB.RADIUS, 0.0)
 	var reach := ceili(radius)
 	for y in range(-reach, reach + 1):
 		for x in range(-reach, reach + 1):

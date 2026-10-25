@@ -282,6 +282,8 @@ func _on_chest_opened(at: Vector2, opener: int) -> void:
 func grant_chest(reward: Dictionary, at: Vector2) -> void:
 	Events.resources_gained.emit(reward["resources"], at)
 	if reward.has("item"):
+		if player.progression.value("treasure_hunter") > 0.0:
+			player.show_passive("treasure_hunter", at)
 		var item_name: String = ItemDB.ITEMS[reward["item"]]["name"]
 		player.equipment.add_to_bag(reward["item"])
 		Events.message.emit("상자에서 %s 획득! (I로 장착)" % item_name)
@@ -342,8 +344,10 @@ func grant_harvest(object_id: int, cell: Vector2i, drops: Dictionary) -> void:
 	var herb := player.progression.value("herbalist")
 	if herb > 0.0 and not player.is_dead:
 		player.heal(herb)
+		player.show_passive("herbalist")
 	var extra := int(player.progression.value("bountiful"))
 	if extra > 0:
+		player.show_passive("bountiful", at)
 		var bonus := {}
 		for kind: String in WorldData.OBJECT_DROPS[object_id]:
 			bonus[kind] = extra
@@ -372,6 +376,7 @@ func _on_day_started(_day: int) -> void:
 	var blessing := player.progression.value("dawn_blessing")
 	if blessing > 0.0 and not player.is_dead:
 		player.heal(player.max_hp() * blessing / 100.0)
+		player.show_passive("dawn_blessing")
 
 
 ## 긴급 요새화: 왕국에 배운 사람이 한 명이라도 있으면 가장 높은 단계로 회복한다. 왕국 상태라 호스트만 한다
