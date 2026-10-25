@@ -13,6 +13,7 @@ func _initialize() -> void:
 	_test_inventory()
 	_test_recipes()
 	_test_chest_loot()
+	_test_outcome_rolls_use_given_rng()
 	_test_biome_rings()
 	_test_material_sources()
 	_test_progression()
@@ -98,19 +99,36 @@ func _test_recipes() -> void:
 
 ## 상자는 그 바이옴 자원을 주고, 장비는 낮은 확률로만 나온다(중복 허용)
 func _test_chest_loot() -> void:
-	seed(12345)
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 12345
 	var items := 0
 	var forest_ok := true
 	for i in 400:
-		var reward := Loot.roll_chest(WorldData.Terrain.FOREST)
+		var reward := Loot.roll_chest(WorldData.Terrain.FOREST, rng)
 		var resources: Dictionary = reward["resources"]
 		forest_ok = forest_ok and resources.get("hardwood", 0) >= 2 and not resources.has("copper")
 		if reward.has("item"):
 			items += 1
 	_check(forest_ok, "숲 상자는 숲 재료(단단한 목재)를 주고 다른 바이옴 재료는 없음")
-	_check(Loot.roll_chest(WorldData.Terrain.SNOW)["resources"].has("iron_ore"), "설원 상자에서는 철광석이 나옴")
+	_check(Loot.roll_chest(WorldData.Terrain.SNOW, rng)["resources"].has("iron_ore"), "설원 상자에서는 철광석이 나옴")
 	_check(items > 20 and items < 110, "장비는 낮은 확률로만 (400번 중 %d번)" % items)
 
+
+
+## 결과용 무작위는 넘겨받은 rng로만 굴린다 (호스트의 Main.rng 하나). 같은 시드면 같은 결과, 전역 시드에는 영향받지 않음
+func _test_outcome_rolls_use_given_rng() -> void:
+	var results := []
+	for global_seed in [1, 2]:
+		seed(global_seed)
+		var rng := RandomNumberGenerator.new()
+		rng.seed = 777
+		var rolls := []
+		for i in 30:
+			rolls.append(Loot.roll_chest(WorldData.Terrain.DESERT, rng))
+			rolls.append(EnemyDB.roll_drop("fire_imp", rng))
+			rolls.append(EnemyDB.pick_invader(5, rng))
+		results.append(rolls)
+	_check(results[0] == results[1], "상자·희귀 재료·침공 구성은 rng 시드로만 정해짐 (전역 randf 미사용)")
 
 ## 바이옴 링(D-014): 왕국에서 멀수록 높은 단계 바이옴, 모든 바이옴이 실제로 생김
 func _test_biome_rings() -> void:
@@ -159,12 +177,44 @@ func _test_material_sources() -> void:
 
 
 
+## 패시브 트리(D-020) 데이터: 선행 노드가 같은 갈래에 있고, 노드 그래픽용 칸이 겹치지 않고, 무기 종류마다 숙련 노드가 있다
+func _test_passive_tree() -> void:
+	var problems: Array[String] = []
+	var taken := {}
+	for id: String in PassiveDB.PASSIVES:
+		var info: Dictionary = PassiveDB.PASSIVES[id]
+		var branch: String = info["branch"]
+		if not PassiveDB.BRANCHES.has(branch) or info["lane"] >= PassiveDB.LANES[branch].size():
+			problems.append("%s 갈래·묶음" % id)
+		var key := "%s %s" % [branch, info["pos"]]
+		if taken.has(key):
+			problems.append("%s 칸 겹침(%s)" % [id, taken[key]])
+		taken[key] = id
+		for required: String in info["requires"]:
+			if not PassiveDB.PASSIVES.has(required) or PassiveDB.PASSIVES[required]["branch"] != branch:
+				problems.append("%s 선행 %s" % [id, required])
+			elif PassiveDB.PASSIVES[required]["pos"].y >= info["pos"].y:
+				problems.append("%s 선행이 위 행이 아님" % id)
+	for item_id: String in ItemDB.ITEMS:
+		var weapon: Dictionary = ItemDB.ITEMS[item_id].get("weapon", {})
+		if not weapon.is_empty() and not PassiveDB.FAMILY_MASTERY.has(weapon.get("family", "")):
+			problems.append("%s 무기 종류" % item_id)
+	for family: String in PassiveDB.FAMILY_MASTERY:
+		if not PassiveDB.PASSIVES.has(PassiveDB.FAMILY_MASTERY[family]):
+			problems.append("%s 숙련 노드" % family)
+	for branch: String in PassiveDB.BRANCHES:
+		if PassiveDB.nodes_in(branch).is_empty():
+			problems.append("%s 비어 있음" % branch)
+	_check(problems.is_empty(), "패시브 트리: 선행·칸·무기 종류가 맞음 %s" % [problems])
+
+
 ## 경험치·패시브(D-015): 비용만큼 쓰고 단계가 오르며, 죽으면 쓰지 않은 경험치만 사라진다
 func _test_progression() -> void:
 	var broken := PassiveDB.PASSIVES.keys().filter(func(id: String) -> bool:
 		var info: Dictionary = PassiveDB.PASSIVES[id]
-		return info["costs"].size() != info["values"].size() or not PassiveDB.ORDER.has(id))
-	_check(broken.is_empty() and PassiveDB.ORDER.size() == PassiveDB.PASSIVES.size(), "패시브 데이터: 단계별 비용·효과 수가 같고 목록 순서에 모두 있음 %s" % [broken])
+		return info["costs"].size() != info["values"].size())
+	_check(broken.is_empty(), "패시브 데이터: 단계별 비용·효과 수가 같음 %s" % [broken])
+	_test_passive_tree()
 	var progression := Progression.new()
 	var first_cost := progression.next_cost("vitality")
 	_check(progression.learn("vitality") != "" and progression.rank("vitality") == 0, "경험치가 모자라면 배울 수 없음")
@@ -178,6 +228,17 @@ func _test_progression() -> void:
 	for i in 10:
 		progression.learn("swift")
 	_check(progression.rank("swift") == PassiveDB.max_rank("swift") and progression.next_cost("swift") == -1, "최고 단계 이상은 못 올림")
+	var tree := Progression.new()
+	tree.add_xp(9999)
+	_check(tree.learn("piercing_arrows").begins_with("먼저 배워야") and tree.rank("piercing_arrows") == 0, "선행 노드(궁술) 없이는 꿰뚫는 화살을 못 배움")
+	tree.learn("bow_mastery")
+	_check(tree.learn("piercing_arrows") == "", "선행 노드를 배우면 아래 노드가 열림")
+	tree.learn("mending_walls")
+	_check(tree.rank("mending_walls") == 0 and tree.learn("fortify") != "", "선행이 둘인 긴급 요새화는 둘 다 배워야 함")
+	tree.learn("frugal_builder")
+	var perks := tree.build_perks()
+	_check(is_equal_approx(perks["discount"], 0.15) and is_equal_approx(perks["hp_scale"], 1.0), "건설 패시브 효과 값 (할인 %s)" % perks["discount"])
+	_check(BuildingDB.discounted({"wood": 10, "stone": 1}, 0.3) == {"wood": 7, "stone": 1}, "건설 비용 할인은 반올림하고 최소 1개")
 	_check(Balance.tower_xp_share(9, 1) == 9 and Balance.tower_xp_share(9, 4) == 3 and Balance.tower_xp_share(2, 4) == 1,
 		"탑 처치 경험치는 플레이어 수로 나눔(올림)")
 
