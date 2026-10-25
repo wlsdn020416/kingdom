@@ -13,6 +13,7 @@ var _remotes := {}  # peer id -> RemotePlayer
 var _ready_peers := {}  # 호스트만: 게임 씬을 다 불러온 peer id
 var _running := false
 var _send_timer := 0.0
+var _sent_ranks := {}
 
 
 func setup(net: NetSession, local_player: Player, remote_parent: Node) -> void:
@@ -20,6 +21,8 @@ func setup(net: NetSession, local_player: Player, remote_parent: Node) -> void:
 	_local = local_player
 	_remote_parent = remote_parent
 	_net.members_changed.connect(_on_members_changed)
+	_local.attack_visual_requested.connect(_send_attack_visual)
+	_local.progression.changed.connect(_send_ranks)
 
 
 ## 모든 사람이 게임 씬을 불러와야 서로의 PlayerSync로 RPC를 보낼 수 있다. 호스트가 모아서 시작 신호를 준다
@@ -61,7 +64,37 @@ func _physics_process(delta: float) -> void:
 		return
 	_send_timer = SEND_INTERVAL
 	var look := _local.appearance()
-	_state.rpc(_local.global_position, _local.aim_direction, look["frame"], look["flip"], look["shown"], _local.is_dead)
+	_state.rpc(_local.global_position, _local.aim_direction, look["frame"], look["flip"], look["shown"], _local.is_dead, look["weapon"])
+
+
+## 패시브를 배우면 단계를 모두에게 알린다. 경험치만 바뀐 경우는 보내지 않는다
+func _send_ranks() -> void:
+	if _running and _local.progression.ranks != _sent_ranks:
+		_sent_ranks = _local.progression.ranks.duplicate()
+		_ranks.rpc(_sent_ranks)
+
+
+@rpc("any_peer", "reliable")
+func _ranks(ranks: Dictionary) -> void:
+	var actor := remote(multiplayer.get_remote_sender_id())
+	if actor == null:
+		return
+	actor.ranks.clear()
+	for id in ranks:
+		if PassiveDB.PASSIVES.has(id):
+			actor.ranks[id] = clampi(int(ranks[id]), 0, PassiveDB.max_rank(id))
+
+
+func _send_attack_visual(id: String, direction: Vector2) -> void:
+	if _running:
+		_attack_visual.rpc(id, direction)
+
+
+@rpc("any_peer", "reliable")
+func _attack_visual(id: String, direction: Vector2) -> void:
+	var actor := remote(multiplayer.get_remote_sender_id())
+	if actor != null and WeaponArtDB.WEAPONS.has(id):
+		actor.weapon_visual.attack(id, direction, PassiveDB.value_in(actor.ranks, "sword_sweep"))
 
 
 func _mark_ready(peer_id: int) -> void:
@@ -91,10 +124,10 @@ func _begin(members: Dictionary) -> void:
 
 
 @rpc("any_peer", "unreliable_ordered")
-func _state(at: Vector2, aim: Vector2, frame: int, flip: bool, shown: bool, dead: bool) -> void:
+func _state(at: Vector2, aim: Vector2, frame: int, flip: bool, shown: bool, dead: bool, weapon: String) -> void:
 	var remote: RemotePlayer = _remotes.get(multiplayer.get_remote_sender_id())
 	if remote != null:
-		remote.apply_state(at, aim, frame, flip, shown, dead)
+		remote.apply_state(at, aim, frame, flip, shown, dead, weapon)
 
 
 ## 호스트의 적이 내 캐릭터를 때렸다. 무적·보호막·사망 판정은 내 Player가 한다

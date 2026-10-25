@@ -12,10 +12,13 @@ const SNAP_DISTANCE := 6.0 * Balance.TILE
 
 var peer_id := 0
 var is_dead := false
+## 그 사람의 패시브 단계 (패시브 id -> 단계). 호스트가 그 사람의 건설·약탈자·보물 사냥꾼 효과를 정할 때 쓴다 (D-020)
+var ranks := {}
 var _target := Vector2.ZERO
 var _aim := Vector2.RIGHT
 var _sprite := Sprite2D.new()
 var _name_label := Label.new()
+var weapon_visual := WeaponVisual.new()
 
 
 func setup(owner_peer: int, display_name: String, at: Vector2) -> RemotePlayer:
@@ -31,6 +34,8 @@ func _ready() -> void:
 	_sprite.texture = Player.SPRITE_SHEET
 	_sprite.hframes = Player.SPRITE_FRAMES_PER_DIR * 3
 	_sprite.position = Vector2(0, -4)
+	add_child(weapon_visual)
+	weapon_visual.setup(_sprite)
 	add_child(_sprite)
 	_name_label.add_theme_font_size_override("font_size", 8)
 	_name_label.add_theme_color_override("font_outline_color", Color.BLACK)
@@ -42,16 +47,17 @@ func _ready() -> void:
 	Fx.add_light(self, Player.LIGHT_RADIUS)
 
 
-func apply_state(at: Vector2, aim: Vector2, frame: int, flip: bool, shown: bool, dead: bool) -> void:
+func apply_state(at: Vector2, aim: Vector2, frame: int, flip: bool, shown: bool, dead: bool, weapon: String = "rusty_sword") -> void:
 	_target = at
 	_aim = aim
+	weapon_visual.set_weapon(weapon)
+	weapon_visual.aim_direction = aim
 	_sprite.frame = frame
 	_sprite.flip_h = flip
 	visible = shown
 	is_dead = dead
 	if position.distance_to(at) > SNAP_DISTANCE:
 		position = at
-	queue_redraw()
 
 
 func take_damage(amount: float) -> void:
@@ -61,7 +67,3 @@ func take_damage(amount: float) -> void:
 
 func _process(delta: float) -> void:
 	position = position.lerp(_target, minf(1.0, FOLLOW_RATE * delta))
-
-
-func _draw() -> void:
-	draw_line(Vector2.ZERO, _aim * 20.0, Color("e8e0c8"), 3.0)
