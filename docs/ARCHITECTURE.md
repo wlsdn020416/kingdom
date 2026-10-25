@@ -5,7 +5,7 @@
 ## 1. 실행 흐름
 
 ```
-project.godot ─ 오토로드 Events(신호), Session(시드·씬 전환·입력 등록)
+project.godot ─ 오토로드 Events(신호), Session(시드·씬 전환·입력 등록, 자식 SteamService = Steam 연결)
       │
       └─ run/main_scene = scenes/title.tscn ── 시드 입력 ── Session.start_game()
                                                             │
@@ -38,7 +38,9 @@ Main (Node2D, scenes/main.gd)          조립 지점: 모든 시스템의 setup(
 ```
 
 `[이름]`은 노드 그룹. 코드에서 추가되는 그룹: `enemies`(Enemy), `lights`(Fx.add_light).
-`Enemy`, `Building`, `Projectile`, UI 패널은 `.tscn` 없이 코드로 생성하고 `_draw()`로 임시 도형을 그린다. 플레이어 몸은 `Player`가 코드로 붙이는 `Sprite2D`(`assets/characters/player.png`, D-012)가 그리고 `_draw()`는 무기·공격 궤적·보호막만 그린다.
+`Enemy`, `Building`, `Projectile`, UI 패널은 `.tscn` 없이 코드로 생성한다. `Building`, `Projectile`, UI 패널은 `_draw()` 등으로 임시 도형을 그린다. 플레이어 몸은 `Player`가 코드로 붙이는 `Sprite2D`(`assets/characters/player.png`, D-012)가 그리고 `_draw()`는 무기·공격 궤적·보호막만 그린다.
+
+적은 `assets/enemies/enemies.aseprite`(64×64, 32프레임, 종류별 태그·레이어)에서 내보낸 `enemies.png`(256×512)를 쓴다. 4열은 움직임 프레임, 8행은 슬라임·고블린·거인·늑대·전갈·늪 슬라임·화염 정령·보스다. `EnemyDB`의 `sprite_row`가 행, `sprite_top`이 전체 프레임의 최상단 y좌표다. `Enemy._draw()`는 원래 크기로 `(-32, -40)`에 그리고 x 이동 방향으로 좌우 반전한다. 8fps로 걷고 정지 시 0번 칸으로 돌아간다(슬라임·늪 슬라임·불꽃·보스는 정지 중에도 움직임 유지). 체력바는 반전하지 않으며 뿔·불꽃을 포함한 그림 위에 둔다. 피격 시 기존 0.08초 동안 그림을 밝게 하며 AI·원형 충돌·공격·보상은 기존 시스템이 맡는다.
 
 기본 낡은 검은 `assets/combat/rusty_sword.png`(32×16), 궤적은 `sword_slash.png`(112×112 4칸, 가로 448×112)를 쓴다. 같은 폴더에 각각의 `.aseprite` 원본이 있다. `Player._draw_rusty_sword()`가 기존 0.12초 동안 4프레임을 재생하고 검을 회전시킨다. 판정이 즉시 끝나므로 첫 프레임부터 사거리 52·120도 전체 궤적을 보이며 공격 시 방향을 저장해 조준을 바꾸어도 유지한다. 부모의 그리기를 자식 몸 스프라이트가 덮어 손잡이를 몸 안쪽에 가린다. 다른 무기는 기존 선·호를 사용한다. 피해·채집은 기존 `Melee.swing()`이 맡는다.
 
@@ -60,7 +62,7 @@ Main (Node2D, scenes/main.gd)          조립 지점: 모든 시스템의 setup(
 | --- | --- | --- |
 | 조립 | `scenes/main.gd`, `scenes/title.gd` | 모든 것 |
 | UI | `src/ui/` | 아래 전부 (읽기 + 명령 메서드 호출). **아무도 UI에 의존하지 않는다** (조립 지점 제외) |
-| 네트워크 (예정) | `src/multiplayer/` | 아래 전부. **게임 시스템은 네트워크에 의존하지 않는다** |
+| 네트워크 | `src/multiplayer/` (지금은 `SteamService`만) | 아래 전부. **게임 시스템은 네트워크에 의존하지 않는다** |
 | 흐름 | `src/gameplay/` | 왕국, 행위자, 월드, 데이터, core |
 | 왕국 | `src/kingdom/` | 행위자·전투, 월드, 데이터, core |
 | 행위자·전투 | `src/characters/`, `src/enemies/`, `src/combat/` | 월드, 데이터, core |

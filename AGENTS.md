@@ -9,7 +9,7 @@
 - 루프: 낮에는 탐험·채집·건설, 밤에는 침공 방어. 최종 보스 처치가 목표, 왕국 멸망 시 그 판은 끝나고 완전 초기화.
 - 조작: WASD 이동, 마우스 조준, 좌클릭 기본 공격, Space 대시(기본 능력), 숫자키 1~4 = 장착 장비의 액티브 스킬(스킬 있는 장비만 빈칸 없이).
 - 엔진: **Godot 4.7** (`project.godot`의 `config/features`), 이 기기에서는 `godot` = 4.7.2.stable (`/opt/homebrew/bin/godot`).
-- 언어: GDScript만 사용. C#·GDExtension·외부 애드온 없음.
+- 언어: GDScript만 사용. C# 없음. 외부 GDExtension은 Steam 연동용 GodotSteam 하나만 허용(`addons/godotsteam/`, D-016). 그 밖의 애드온은 상의 후 결정 기록과 함께 추가.
 - 현재 상태: 1인용 플레이 가능 프로토타입(전투, 낮/밤, 침공, 건설, 장비, 월드 생성, 지도). 멀티플레이와 픽셀아트는 아직 없다. 자세한 단계는 `docs/ROADMAP.md`.
 
 관련 문서: `docs/ARCHITECTURE.md`(구조·의존성), `docs/DECISIONS.md`(설계 결정), `docs/ROADMAP.md`(단계), `docs/TESTING.md`(검증 명령).
@@ -26,10 +26,11 @@
 | `src/enemies/` | 적과 AI | |
 | `src/kingdom/` | 왕국 핵, 건물, 건설 모드, 공용 자원 | |
 | `src/gameplay/` | 낮/밤, 웨이브, 상자 보상, 공유 지도 상태, 핑 | |
-| `src/multiplayer/` | 네트워크 연결과 동기화 | **아직 없음.** 멀티플레이 작업을 시작할 때 만든다 |
+| `src/multiplayer/` | 네트워크 연결과 동기화. 지금은 Steam 연결(`SteamService`, `Session`이 자식으로 소유) | 동기화 코드는 M1에서 추가 |
+| `addons/godotsteam/` | GodotSteam GDExtension (외부, MIT). macOS·Win64·Linux64 라이브러리만 포함 | 직접 고치지 않는다. 버전 교체는 D-016 절차 |
 | `src/ui/` | HUD, 스킬바, 건설 메뉴, 지도, 장비창, 장비 상자 창, 제작대 창, 패시브 창, 전략회의, 멸망 화면, 공용 UI 생성 함수(`UiKit`) | |
 | `data/` | 밸런스 수치와 아이템·적·건물·레시피·패시브 정의 | 숫자 조정은 여기서만 |
-| `assets/` | 이미지·오디오·폰트. `branding/`(로고, 게임 아이콘), `characters/`(캐릭터 원본·시트, D-012), `kingdom/`(성 원본·PNG), `world/`(바닥 타일·생성물 원본·PNG), `combat/`(무기·공격 이펙트 원본·PNG), `ui/`(체력바 원본·PNG) | 나머지 스프라이트는 M3(픽셀아트)에서 기능별 하위 폴더로 추가 |
+| `assets/` | 이미지·오디오·폰트. `branding/`(로고, 게임 아이콘), `characters/`(캐릭터 원본·시트, D-012), `kingdom/`(성 원본·PNG), `world/`(바닥 타일·생성물 원본·PNG), `combat/`(무기·공격 이펙트 원본·PNG), `ui/`(체력바 원본·PNG), `enemies/`(적 원본·시트) | 나머지 스프라이트는 M3(픽셀아트)에서 기능별 하위 폴더로 추가 |
 | `tests/` | 자동 검사(`run_all.sh`로 전부 실행) | `docs/TESTING.md` |
 | `tools/` | 개발 보조 스크립트(예: `world_stats.gd`) | 게임에 포함되지 않음 |
 | `docs/` | 기획서(`기획서.md`), 아키텍처·결정·로드맵·테스트 문서 | 기획서는 사용자가 관리 |

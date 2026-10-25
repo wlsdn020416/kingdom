@@ -15,6 +15,7 @@ func _ready() -> void:
 	_check_terrain_tiles(main.world)
 	_check_object_tiles(main.world)
 	_check_health_bars(main)
+	_check_enemy_art(main)
 
 	_check(main.world.data.is_explored(main.world.data.core_cell), "시작 지점 주변이 지도에 탐험됨")
 
@@ -62,6 +63,52 @@ func _ready() -> void:
 
 	print("SMOKE TEST %s (실패 %d)" % ["PASS" if _failures == 0 else "FAIL", _failures])
 	get_tree().quit(1 if _failures > 0 else 0)
+
+
+## 모든 적의 그림이 존재하고 움직임·피격 표시가 기존 충돌과 피해 판정을 유지해야 한다.
+func _check_enemy_art(main: Main) -> void:
+	var image := Enemy.SPRITE_TEXTURE.get_image()
+	var atlas_ok := image.get_size() == Vector2i(Enemy.SPRITE_SIZE * Enemy.ANIMATION_FRAMES, Enemy.SPRITE_SIZE * EnemyDB.TYPES.size())
+	var rows: Dictionary = {}
+	var motion_ok := true
+	var rules_ok := true
+	for id: String in EnemyDB.TYPES:
+		var stats: Dictionary = EnemyDB.TYPES[id]
+		var row: int = stats["sprite_row"]
+		var top: int = stats["sprite_top"]
+		if row < 0 or row >= EnemyDB.TYPES.size() or rows.has(row):
+			atlas_ok = false
+			continue
+		rows[row] = true
+		for frame in Enemy.ANIMATION_FRAMES:
+			var painted := false
+			for y in Enemy.SPRITE_SIZE:
+				for x in Enemy.SPRITE_SIZE:
+					if image.get_pixel(frame * Enemy.SPRITE_SIZE + x, row * Enemy.SPRITE_SIZE + y).a > 0.0:
+						painted = true
+						atlas_ok = atlas_ok and y >= top
+			atlas_ok = atlas_ok and painted
+		var enemy := Enemy.new().setup(id, true)
+		main.get_node("Enemies").add_child(enemy)
+		enemy.set_physics_process(false)
+		enemy.velocity = Vector2.LEFT * 10.0
+		enemy._update_animation(0.13)
+		motion_ok = motion_ok and enemy._facing_left and enemy._animation_frame == 1
+		enemy.velocity = Vector2.RIGHT * 10.0
+		enemy._update_animation(0.13)
+		motion_ok = motion_ok and not enemy._facing_left
+		enemy.velocity = Vector2.ZERO
+		enemy._update_animation(0.13)
+		if id not in Enemy.IDLE_ANIMATED:
+			motion_ok = motion_ok and enemy._animation_frame == 0
+		var collider := enemy.get_child(0) as CollisionShape2D
+		rules_ok = rules_ok and is_equal_approx((collider.shape as CircleShape2D).radius, stats["radius"])
+		enemy.take_damage(1.0)
+		rules_ok = rules_ok and is_equal_approx(enemy.hp, float(stats["hp"]) - 1.0) and enemy._flash > 0.0
+		enemy.queue_free()
+	_check(atlas_ok, "적 8종의 모든 프레임과 체력바용 그림 높이가 유효")
+	_check(motion_ok, "적은 이동 시 프레임·좌우 방향이 바뀌고 정지 시 걷기를 멈춤")
+	_check(rules_ok, "적 그래픽 교체 후에도 종류별 충돌·피해·피격 표시가 유지")
 
 
 ## 체력바 그림 교체가 표시 수명이나 실제 체력을 바꾸면 안 된다.

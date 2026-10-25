@@ -86,6 +86,8 @@
 
 - 그래픽 적용 추가: 채집물·몬스터·건물·HUD 체력바는 `assets/ui/health_bars.aseprite`에서 내보낸 PNG로 교체했다. `HealthBarArt`는 그리기만 공유하며 체력·표시 시간은 기존 소유 시스템이 유지한다.
 
+- 그래픽 적용 추가: 현재 적 8종을 `assets/enemies/enemies.aseprite`에서 내보낸 시트로 교체했다. 64×64 칸, 종류별 4프레임·8fps, 가로 4열·세로 8행이며 `EnemyDB.sprite_row`·`sprite_top`으로 그림과 체력바를 배치한다. 좌우 방향은 반전하며 상·하 별도 그림은 아직 없다. 보스 외형은 현재 보스의 시각 시안이며 최종 보스 기획을 확정하지 않는다.
+
 ## D-012 캐릭터 스프라이트 형식 — 임시 (2026-10-25)
 
 - 원본 `assets/characters/<이름>.aseprite`, 게임은 같은 폴더의 가로 한 줄 시트 `<이름>.png`(Aseprite에서 내보냄)를 쓴다.
@@ -145,3 +147,15 @@
   - 날렵함(2단계): 이동 속도 +8/16%
   - 약탈자(2단계): 바이옴 몬스터 희귀 재료 확률 +15/30%p
 - **판이 끝나면(왕국 멸망) 경험치와 패시브도 모두 초기화된다** (사용자 결정). 판 상태는 main.tscn 아래에만 둔다는 기존 규칙과 같다.
+
+## D-016 Steam 연동: GodotSteam GDExtension 도입 — 확정 (2026-10-25, 사용자 결정)
+
+- 결정: 출시·멀티플레이 접속은 Steam으로 한다. Steam 기능(로그인 정보, 로비·초대, 중계 서버를 쓰는 P2P)은 GodotSteam GDExtension으로 쓴다. "GDScript만, 외부 애드온 없음" 규칙(AGENTS 1·11절)에서 이것만 예외로 한다.
+- 버전: GodotSteam 4.23.2 GDExtension (Godot 4.4 이상, Steamworks SDK 1.65, MIT). 받은 곳: codeberg.org/godotsteam/godotsteam 릴리스 `v4.23.2-gde`. SteamMultiplayerPeer가 들어 있어 Godot 멀티플레이 API(RPC, MultiplayerSynchronizer)를 그대로 Steam 위에서 쓸 수 있다.
+- 넣은 것: `addons/godotsteam/`에 macOS(universal)·Windows 64비트·Linux 64비트 라이브러리, `godotsteam.gdextension`, 라이선스. 안드로이드·32비트 파일은 뺐다(약 97MB → 30MB).
+- 고친 것: 받은 `godotsteam.gdextension`의 macOS 경로가 실제 파일명(`.universal.dylib`)과 달라 고쳤다. 빠진 플랫폼 줄도 지웠다.
+- 뺀 것: 에디터 자동 업데이트 플러그인(`godotsteam_plugin.gd`, `editor/`). 에디터를 열 때 인터넷에서 버전을 확인하고 `addons/` 폴더를 통째로 바꾸므로, 버전 교체는 사람이 이 결정 기록을 갱신하며 한다.
+- App ID: 개발 중에는 Valve 테스트 앱 480(Spacewar). 자체 App ID를 받으면(Steam Direct 등록) `SteamService.APP_ID`만 바꾼다. `steam_appid.txt`는 쓰지 않는다(`steamInitEx(APP_ID)`로 전달).
+- 구조: `src/multiplayer/steam_service.gd`(`SteamService` 노드)를 오토로드 `Session`이 자식으로 소유한다. 새 오토로드는 만들지 않았다(D-002 유지). Steam 싱글턴은 `Engine.get_singleton("Steam")`으로 찾아서, GodotSteam이 없거나 Steam이 꺼져 있어도 게임과 테스트가 돈다. headless 실행과 `-- --no-steam` 인자에서는 초기화하지 않는다.
+- 확인 상태: 자동 테스트(headless)는 Steam을 끈 채로 통과. 실제 Steam 로그인 연결은 사람이 `godot --path .`로 시작 화면의 "Steam:" 줄을 보고 확인해야 한다.
+- 다시 볼 조건: GodotSteam 버전 교체, Godot 버전 교체(4.4 미만 불가), 자체 App ID 발급, 다른 플랫폼(EOS 등) 추가 검토.

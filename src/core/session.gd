@@ -11,10 +11,13 @@ var seed_text := ""
 var last_result := ""
 ## `godot --path . -- --seed=abc` 로 실행하면 시작 화면을 건너뛴다 (테스트용)
 var autostart_seed := ""
+## 게임을 켜 있는 동안 계속 살아 있어야 해서 오토로드인 Session 아래에 둔다 (새 오토로드를 만들지 않음, D-016)
+var steam := SteamService.new()
 
 
 func _ready() -> void:
 	InputBindings.register()
+	add_child(steam)
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--seed="):
 			autostart_seed = arg.trim_prefix("--seed=")

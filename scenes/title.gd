@@ -49,7 +49,9 @@ func _ready() -> void:
 	start.custom_minimum_size.x = 90
 	row.add_child(start)
 	box.add_child(row)
-	box.add_child(UiKit.note("프로토타입: 1인 플레이. 멀티플레이와 픽셀아트는 아직 없습니다."))
+	box.add_child(UiKit.note("프로토타입: 1인 플레이. 멀티플레이는 아직 없습니다."))
+	var steam_color := UiKit.ACCENT if Session.steam.available else UiKit.MUTED
+	box.add_child(UiKit.heading("Steam: " + Session.steam.status_text, 13, steam_color))
 	_seed_input.grab_focus()
 
 

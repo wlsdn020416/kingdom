@@ -3,6 +3,13 @@ extends CharacterBody2D
 ## 적. 침공(invader) 적은 왕국 핵으로 가면서 길을 막는 벽·나무를 부순다.
 ## 낮에 돌아다니는 적은 플레이어가 가까이 오면 쫓아온다.
 
+const SPRITE_TEXTURE := preload("res://assets/enemies/enemies.png")
+const SPRITE_SIZE := 64
+const SPRITE_OFFSET := Vector2(-32, -40)
+const ANIMATION_FRAMES := 4
+const ANIMATION_FPS := 8.0
+const IDLE_ANIMATED := ["slime", "bog_slime", "fire_imp", "boss"]
+
 var type_id := ""
 var stats := {}
 var hp := 1.0
@@ -20,6 +27,9 @@ var _flash := 0.0
 var _wander_direction := Vector2.RIGHT
 var _knockback := Vector2.ZERO
 var _dying := false
+var _animation_time := 0.0
+var _animation_frame := 0
+var _facing_left := false
 
 
 func setup(id: String, invader: bool, hp_scale := 1.0) -> Enemy:
@@ -69,6 +79,7 @@ func _physics_process(delta: float) -> void:
 	velocity = global_position.direction_to(target) * speed + _knockback
 	_knockback = _knockback.move_toward(Vector2.ZERO, 1200.0 * delta)
 	move_and_slide()
+	_update_animation(delta)
 
 	if is_invader:
 		_attack_blockers()
@@ -152,13 +163,26 @@ func _radial_shot(delta: float) -> void:
 		})
 
 
-## 임시 그림. Phase 2에서 스프라이트로 교체.
+## 이동이 멈추면 걷기도 멈추고, 젤리·불꽃·보스의 호흡만 계속 움직인다.
+func _update_animation(delta: float) -> void:
+	if absf(velocity.x) > 1.0:
+		_facing_left = velocity.x < 0.0
+	if velocity.length() > 1.0 or type_id in IDLE_ANIMATED:
+		_animation_time += delta
+	else:
+		_animation_time = 0.0
+	_animation_frame = int(_animation_time * ANIMATION_FPS) % ANIMATION_FRAMES
+
+
 func _draw() -> void:
-	var body := Rect2(-radius, -radius, radius * 2.0, radius * 2.0)
-	draw_rect(body, Color.WHITE if _flash > 0.0 else stats["color"])
-	var eye_y := -radius * 0.3
-	draw_rect(Rect2(-radius * 0.4 - 2.0, eye_y, 3, 3), Color("111111"))
-	draw_rect(Rect2(radius * 0.4 - 1.0, eye_y, 3, 3), Color("111111"))
+	var row: int = stats["sprite_row"]
+	var region := Rect2(Vector2(_animation_frame * SPRITE_SIZE, row * SPRITE_SIZE), Vector2.ONE * SPRITE_SIZE)
+	var tint := Color(2.4, 2.4, 2.4) if _flash > 0.0 else Color.WHITE
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2(-1 if _facing_left else 1, 1))
+	draw_texture_rect_region(SPRITE_TEXTURE, Rect2(SPRITE_OFFSET, Vector2.ONE * SPRITE_SIZE), region, tint)
+	draw_set_transform(Vector2.ZERO)
 	if hp < max_hp:
 		var width := maxi(HealthBarArt.WIDTH, roundi(radius * 2.0 + 8.0))
-		HealthBarArt.draw_bar(self, Vector2(-width / 2.0, -radius - 12.0), hp / max_hp, HealthBarArt.Tone.RED, width)
+		var sprite_top: int = stats["sprite_top"]
+		var bar_y := minf(-radius - 12.0, sprite_top + SPRITE_OFFSET.y - HealthBarArt.HEIGHT - 2.0)
+		HealthBarArt.draw_bar(self, Vector2(-width / 2.0, bar_y), hp / max_hp, HealthBarArt.Tone.RED, width)
