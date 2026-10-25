@@ -89,7 +89,7 @@ func _build_detail() -> void:
 	_choose = UiKit.button("설치 모드", func() -> void: choose(_selected))
 	_choose.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_place(body, _choose, Vector2(18, 466), Vector2(322, 44))
-	_place(body, _label("실제 건물과 동일한 그림입니다", 11, MenuArt.MUTED), Vector2(18, 520), Vector2(322, 18))
+	_place(body, _label("배치 위치를 골라 왕국의 방어선을 완성하세요", 11, MenuArt.MUTED), Vector2(18, 520), Vector2(322, 18))
 
 
 func _process(delta: float) -> void:
