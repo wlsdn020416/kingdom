@@ -28,9 +28,9 @@
 | `src/gameplay/` | 낮/밤, 웨이브, 상자 보상, 공유 지도 상태, 핑 | |
 | `src/multiplayer/` | 네트워크 연결과 동기화: Steam 연결(`SteamService`), 접속·명단(`NetSession`, 둘 다 `Session`이 자식으로 소유), 게임 씬 동기화(`PlayerSync`·`RemotePlayer` 플레이어, `CombatSync`·`EnemyPuppet` 적·시간·핵·효과음, `WorldSync` 나무·바위·상자, `KingdomSync` 창고·건물·장비 상자·제작대, `MapSync` 탐험 칸·핑, `MeetingSync` 전략회의) | RPC는 이 폴더에만 (D-017) |
 | `addons/godotsteam/` | GodotSteam GDExtension (외부, MIT). macOS·Win64·Linux64 라이브러리만 포함 | 직접 고치지 않는다. 버전 교체는 D-016 절차 |
-| `src/ui/` | HUD, 스킬바, 건설 메뉴, 지도, 마네킹형 장비·소지품 창, 장비 상자 창, 제작대 창, 패시브 창, 전략회의, 멸망 화면, 공용 UI 생성 함수(`UiKit`) | |
+| `src/ui/` | HUD, 스킬바, 건설 메뉴, 지도, 마네킹형 장비·소지품 창, 장비 상자 창, 제작대 창, 순간이동 탑 창, 보스 체력바·침공 예고(`ThreatBanner`), 패시브 창, 전략회의, 멸망 화면, 공용 UI 생성 함수(`UiKit`), 방사형 패시브(`PassiveTree`·`PassiveNode`), 메뉴·패시브 테마(`MenuArt`) | |
 | `data/` | 밸런스 수치와 아이템·적·건물·레시피·패시브 정의 | 숫자 조정은 여기서만 |
-| `assets/` | 이미지·오디오·폰트. `branding/`(로고, 게임 아이콘), `characters/`(캐릭터 원본·시트, D-012), `kingdom/`(성·건설물 원본·PNG), `world/`(바닥 타일·생성물 원본·PNG), `combat/`(무기·공격 이펙트 원본·PNG), `ui/`(체력바·마네킹·슬롯·재료 아이콘 원본·PNG), `enemies/`(적 원본·시트), `audio/sfx/`(기본 효과음 WAV·생성 원본·목록·미리듣기) | 나머지 스프라이트는 M3(픽셀아트)에서 기능별 하위 폴더로 추가 |
+| `assets/` | 이미지·오디오·폰트. `branding/`(로고, 게임 아이콘), `fonts/`(Kingdom Dot 파생 글꼴·OFL·원본), `audio/music/`(메뉴 BGM·생성 원본·편집 기록), `characters/`(캐릭터 원본·시트, D-012), `kingdom/`(성·건설물 원본·PNG), `world/`(바닥 타일·생성물 원본·PNG), `combat/`(무기·공격 이펙트 원본·PNG), `ui/`(체력바·마네킹·슬롯·재료 아이콘 원본·PNG), `enemies/`(적 원본·시트), `audio/sfx/`(기본 효과음 WAV·생성 원본·목록·미리듣기) | 나머지 스프라이트는 M3(픽셀아트)에서 기능별 하위 폴더로 추가 |
 | `tests/` | 자동 검사(`run_all.sh`로 전부 실행) | `docs/TESTING.md` |
 | `tools/` | 개발 보조 스크립트(예: `world_stats.gd`) | 게임에 포함되지 않음 |
 | `docs/` | 기획서(`기획서.md`), 아키텍처·결정·로드맵·테스트 문서 | 기획서는 사용자가 관리 |

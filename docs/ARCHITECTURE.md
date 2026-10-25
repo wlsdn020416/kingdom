@@ -49,6 +49,10 @@ Main (Node2D, scenes/main.gd)          조립 지점: 모든 시스템의 setup(
 
 적은 `assets/enemies/enemies.aseprite`(64×64, 32프레임, 종류별 태그·레이어)에서 내보낸 `enemies.png`(256×512)를 쓴다. 4열은 움직임 프레임, 8행은 슬라임·고블린·거인·늑대·전갈·늪 슬라임·화염 정령·보스다. `EnemyDB`의 `sprite_row`가 행, `sprite_top`이 전체 프레임의 최상단 y좌표다. `Enemy._draw()`는 원래 크기로 `(-32, -40)`에 그리고 x 이동 방향으로 좌우 반전한다. 8fps로 걷고 정지 시 0번 칸으로 돌아간다(슬라임·늪 슬라임·불꽃·보스는 정지 중에도 움직임 유지). 체력바는 반전하지 않으며 뿔·불꽃을 포함한 그림 위에 둔다. 피격 시 기존 0.08초 동안 그림을 밝게 하며 AI·원형 충돌·공격·보상은 기존 시스템이 맡는다.
 
+건설(D-022)은 `BuildingDB`의 `category`(벽·공성탑·생활 탭)·`tier`(필요한 제작대 단계)·`outside`(영토 밖 가능)로 나뉜다. `Kingdom.tech_error()`가 잠금 검증을 맡고, `teleports()`·`find_teleport_near()`·`can_deposit_at()`(핵·보급소)이 생활 건물을 찾는다. 순간이동 탑 창(`TeleportPanel`)은 E로 열리며 이동은 `Player.teleport_to()`로 각자 정한다. 감시탑은 `World.reveal_area()`로 지도를 밝히고 `cells_explored`로 모두에게 전한다. 모닥불 회복은 각자의 `Main`이 내 캐릭터에 적용한다. 새 건물 그림은 원본 칸에 `tint`만 입힌다(임시).
+
+보스 7종(D-021)은 보스 행을 함께 쓰고 `EnemyDB`의 `tint`로 색만 다르다(임시). 보스 패턴은 `Enemy`가 `patterns`·`rage` 데이터를 읽어 호스트에서만 실행한다. 탄은 `Projectile`(적 탄 → `enemy_shot`으로 참가자에게 복제), 소환은 부모 노드에 `Enemy`를 추가한다. 패턴에는 무작위가 없다.
+
 무기 5종과 폭탄은 `assets/combat/weapons.aseprite`·PNG(512×384)를 쓴다. 64×64의 가로 8칸(대기 1 + 공격·회복 7), 세로 6행(낡은 검·흑요석 검·낡은 활·산탄 석궁·화염 지팡이·폭탄 주머니)이다. `WeaponArtDB`가 행·피벗·연출 시간·반동을 정의한다. `WeaponVisual`은 Player와 RemotePlayer가 공유하며 무기와 장갑을 몸 뒤에 그리고 몸에 짧은 이동·기울기 반동을 준다. 공격 시 장비·방향을 저장하며 무기 교체 시 이전 모션을 끝낸다. 두 검의 0.12초 궤적은 첫 프레임부터 기존 사거리·부채꼴을 표시한다. 휩쓸기 패시브로 넓어진 각도는 칼끝 사거리를 유지하며 궤적 양 끝을 확장해 표현하고, 원격 플레이어는 전달받은 패시브 단계로 같은 그림을 그린다. 활은 시위 복귀·재장전, 석궁은 반동·발사 섬광, 지팡이는 시전, 폭탄은 투척·작은 주머니 회복 자세를 쓴다. 기존 낡은 검 단독 PNG·Aseprite와 4프레임 궤적은 최초 원본으로 보존한다.
 
 `projectiles.aseprite`·PNG(128×192)는 32×32의 4프레임×6행(화살·볼트·작은 화염탄·화염구·폭탄·적 마법탄)이다. Projectile의 `art_id`는 그림만 고른다. 폭탄의 높이·회전은 그리기 변환뿐이며 기존 지면 경로·수명·범위를 유지한다. `attack_effects.aseprite`·PNG(768×640)는 128×128의 6프레임×5행(강철 검 궤적·흑요석 검 궤적·명중·폭발·화염 명중)이다. `CombatEffect`는 명중·폭발을 재생 후 제거하며 피해를 계산하지 않는다. Main이 `Events.combat_effect_requested`를 받아 생성하고 CombatSync가 호스트 확정 결과를 참가자에게 전달한다. 폭발 그림 크기는 실제 폭발 반경을 따른다.
@@ -108,6 +112,8 @@ HUD 왼쪽 위는 낮·밤 시계와 성·내 체력 두 줄을 상시 표시한
 | `object_harvested` | World(플레이어가 오브젝트를 부숨, 굴린 재료·부순 사람 peer id) | Main(부순 사람에게 재료·경험치·풍요로운 손. 참가자면 WorldSync로 보냄) (D-015, D-017) |
 | `item_crafted` | Kingdom(`craft()`, 만든 사람 peer id) | Main(만든 사람에게 경험치) (D-015) |
 | `enemy_shot` | Projectile(적 탄 생성) | CombatSync(호스트: 참가자 화면에 같은 탄) (D-017) |
+| `damage_dealt` | Enemy(`take_damage`, 강조 여부) | Main(피해 숫자·혼자 플레이 멈칫), CombatSync(호스트: 묶어서 참가자에게) (D-023) |
+| `screen_shake_requested` | Enemy(보스 돌진·처치), Projectile(폭발·범위 피해) | Main(거리만큼 내 화면 흔들기), CombatSync(호스트: 참가자에게) (D-023) |
 | `chest_opened` | World(연 사람 peer id) | Main(호스트가 보상 추첨, 연 사람에게) |
 | `map_cells_changed` | World, Kingdom | MapState |
 | `enemy_killed` | Enemy | Main(처치 수·금 보상) |
@@ -154,10 +160,21 @@ HUD 왼쪽 위는 낮·밤 시계와 성·내 체력 두 줄을 상시 표시한
 
 ## 7. 알아둘 점
 
-- 패시브 트리(D-020)의 노드 그래픽은 `PassiveDB`의 `branch`·`lane`·`pos`(갈래 격자의 열, 행)·`requires`(연결선)만 보고 그린다. 배우기는 `Progression.learn()`(선행 검사 포함)만 부른다. 지금 `PassivePanel`은 이 값으로 버튼을 격자에 놓기만 한 기능용 화면이다. 효과 값은 `Progression.value(id)`(내 것), `PassiveDB.value_in(ranks, id)`(다른 사람 것), 건설 효과는 `PassiveDB.build_perks()` 한 곳에서 읽는다.
+- 패시브 트리(D-020)는 `PassiveArtDB`(`data/passive_art.gd`)의 아이콘·방사형 배치와 `PassiveDB.requires`의 실제 선행 연결선을 사용한다. `PassiveTree`는 중앙 왕관에서 전투·생존·건설 경로를 펼치고 `PassiveNode`는 잠금·학습 가능·학습 중·완료 및 선택 상태를 그린다. 노드 선택은 상세만 열고, 오른쪽 배우기 버튼이 `Progression.learn()`을 호출한다. 비용·효과·선행 규칙은 PassiveDB/Progression이 소유한다. 1232×672 화면을 창에 맞춰 축소한다. 기존 `pos`는 게임 데이터의 격자 좌표이며 시각 배치와 분리된다.
+- 새 패시브 노드는 `PassiveDB`와 함께 `PassiveArtDB`의 `ICON_ORDER`·`LAYOUT`에도 넣어야 패시브 창에 보인다(로직 테스트가 확인). D-020 확장 노드 24개는 바깥 고리에 임시 배치했고 아이콘 그림은 아직 없다. 수리·건설 효과는 `PassiveDB.repair_perks()`·`build_perks()`로 모아 `Kingdom.repair()`·`build()`에 넘긴다.
 - 노드가 트리에 붙기 전에 `set_physics_process(false)`를 불러도, `_physics_process`를 정의한 노드는 `_ready` 때 Godot이 다시 켠다. 켜고 끌 조건은 `_ready()`에서 정한다 (`WorldSync`, `KingdomSync`).
 - 투사체는 `Area2D` 겹침 신호 대신 매 물리 프레임 `intersect_shape`로 직접 충돌을 조회한다. `Area2D` 신호로는 타일·벽·핵 같은 정적 바디가 감지되지 않았기 때문이다.
 - 타일 충돌은 여러 칸이 한 바디로 묶여 있어서, 맞은 칸은 `World.object_cell_near()`로 위치를 보고 찾는다.
 - 월드는 192×192칸 단일 배열(`WorldData`)이다. 이 크기에서는 청크 로딩이 필요 없어서 없다(D-006).
 - 충돌 레이어: 1 water, 2 objects, 3 buildings, 4 player, 5 enemies (`PhysicsLayers` = `project.godot [layer_names]`).
 - 입력은 `InputBindings.register()`가 `Session._ready()`에서 런타임에 등록한다. 그래서 `--script`로 실행한 테스트에는 입력 액션이 없다.
+
+### 시작 화면·패시브 그래픽 (2026-10-26)
+
+`MenuArt`는 시작 화면과 패시브 창만 사용하는 픽셀 패널·버튼 테마다. `assets/ui/menu_chrome`·`passive_nodes`·`passive_icons`의 Aseprite 원본과 PNG를 사용한다. 시작 화면은 `assets/branding/title_background.png`를 화면에 채우고 왼쪽에 로고·메뉴를 둔다. 싱글/멀티 팝업과 호스트 시작 조건은 유지하며 팝업 뒤 메뉴의 키보드 포커스를 막는다. 새 오토로드·그룹·네트워크 상태는 없다.
+
+### 메뉴 음악·한국어 글꼴 (2026-10-26)
+
+`Title`은 `MenuMusic` AudioStreamPlayer를 직접 소유한다. `SoundDB.TITLE_MUSIC`의 OGG 스트림을 복제해 반복하며 목표 음량·페이드 시간은 같은 데이터 파일에 있다. 팝업은 재생기를 만들지 않으며 씬 종료 시 함께 해제된다. 음악은 오토로드나 RPC로 공유하지 않는다. `assets/audio/music/`에 게임용 약 74초 루프와 생성 원본·편집 기록을 보관한다.
+
+`assets/fonts/kingdom_dot.ttf`는 Galmuri11(OFL 1.1) 기반 파생 글꼴이며 한글 11,172자를 보존하고 고정폭 숫자·왕관/검/방패 등을 새로 그렸다. 프로젝트의 `gui/theme/custom_font`가 전체 Control UI에 적용하고 `MenuArt.theme`와 직접 그리는 `ActionBar`도 `UiKit.GAME_FONT`를 쓴다. 원본·라이선스는 같은 폴더에, 개발용 재현 도구는 tools/build_kingdom_font.py에 있다.
