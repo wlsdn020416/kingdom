@@ -12,6 +12,9 @@ func _ready() -> void:
 	var main: Main = load("res://scenes/main.tscn").instantiate()
 	add_child(main)
 	await _frames(5)
+	_check_terrain_tiles(main.world)
+	_check_object_tiles(main.world)
+	_check_health_bars(main)
 
 	_check(main.world.data.is_explored(main.world.data.core_cell), "시작 지점 주변이 지도에 탐험됨")
 
@@ -31,16 +34,16 @@ func _ready() -> void:
 	main.player.use_skill(0)
 	_check(not main.player.equipment.is_ready("life_charm"), "장착한 치유 부적이 스킬바 1번, 사용 후 쿨타임")
 
-	var bag_before := main.player.equipment.bag.size()
 	var resources_before := _total_resources(main)
 	Events.chest_opened.emit(main.player.global_position)
-	_check(main.player.equipment.bag.size() > bag_before or _total_resources(main) > resources_before, "상자 보상 지급")
+	_check(_total_resources(main) > resources_before, "상자 보상으로 자원 지급")
 
 	await _check_harvest(main)
 	await _check_melee(main)
 	await _check_build_menu(main)
 	await _check_storage(main)
 	await _check_workbench(main)
+	await _check_progression(main)
 	await _check_inventory(main)
 
 	main.day_night.skip_to_night()
@@ -59,6 +62,84 @@ func _ready() -> void:
 
 	print("SMOKE TEST %s (실패 %d)" % ["PASS" if _failures == 0 else "FAIL", _failures])
 	get_tree().quit(1 if _failures > 0 else 0)
+
+
+## 체력바 그림 교체가 표시 수명이나 실제 체력을 바꾸면 안 된다.
+func _check_health_bars(main: Main) -> void:
+	var world := main.world
+	var cell := _find_tree(world)
+	if cell == World.NO_CELL:
+		_check(false, "체력바 검사에 쓸 나무를 찾음")
+		return
+	world.damage_object(cell, 1.0, false)
+	var hp := world.data.object_hp[world.data.index(cell)]
+	_check(world._hp_bar_time.has(cell) and world._hp_overlay.z_index > world.object_layer.z_index,
+		"손상된 채집물의 체력바가 오브젝트 위에 표시됨")
+	world._process(World.HP_BAR_TIME + 0.01)
+	_check(not world._hp_bar_time.has(cell) and world.data.object_hp[world.data.index(cell)] == hp,
+		"4초 뒤 체력바만 숨고 채집물 체력은 그대로 유지")
+	world.damage_object(cell, 1.0, false)
+	world.damage_object(cell, hp, false)
+	_check(not world._hp_bar_time.has(cell) and world.data.get_object(cell) == WorldData.Obj.NONE,
+		"채집물이 부서지면 체력바도 함께 제거")
+	_check(main.hud._hp_bar.get_theme_stylebox("fill") is StyleBoxTexture
+		and main.hud._core_bar.get_theme_stylebox("background") is StyleBoxTexture,
+		"플레이어·왕국 HUD에도 같은 픽셀아트 체력바 사용")
+
+
+## 키가 큰 나무도 기존 채집 칸과 충돌을 유지하고, 없는 생성물 칸은 투명해야 한다.
+func _check_object_tiles(world: World) -> void:
+	var source: TileSetAtlasSource = world.object_layer.tile_set.get_source(TilesetBuilder.OBJECT_SOURCE)
+	var image := source.texture.get_image()
+	var artwork_ok := image.get_size() == Vector2i(WorldData.Obj.size() * Balance.TILE, TilesetBuilder.OBJECT_HEIGHT)
+	var collision_ok := true
+	var alignment_ok := true
+	for obj in WorldData.Obj.size():
+		var coords := Vector2i(obj, 0)
+		if not source.has_tile(coords):
+			artwork_ok = false
+			continue
+		var tile := source.get_tile_data(coords, 0)
+		var expected := 0 if obj == WorldData.Obj.NONE else 1
+		collision_ok = collision_ok and tile.get_collision_polygons_count(TilesetBuilder.OBJECT_PHYSICS_LAYER) == expected
+		if expected == 1:
+			var points := tile.get_collision_polygon_points(TilesetBuilder.OBJECT_PHYSICS_LAYER, 0)
+			collision_ok = collision_ok and points.size() == 4 and points[0] == Vector2(-14, -14) and points[2] == Vector2(14, 14)
+		alignment_ok = alignment_ok and tile.texture_origin == Vector2i(0, -8)
+		var painted := false
+		for y in image.get_height():
+			for x in Balance.TILE:
+				painted = painted or image.get_pixel(obj * Balance.TILE + x, y).a > 0.0
+		artwork_ok = artwork_ok and painted == (obj != WorldData.Obj.NONE)
+	_check(artwork_ok, "생성물 그림은 모두 존재하고 NONE 칸은 투명")
+	_check(collision_ok, "생성물 충돌은 기존 28×28을 유지하고 NONE에는 없음")
+	_check(alignment_ok, "48픽셀 생성물의 바닥은 기존 32픽셀 칸에 정렬")
+
+
+## 바닥 변형을 늘려도 빈 아틀라스 칸이나 충돌 없는 물이 생기지 않아야 한다.
+func _check_terrain_tiles(world: World) -> void:
+	var tile_set := world.terrain_layer.tile_set
+	var source: TileSetAtlasSource = tile_set.get_source(TilesetBuilder.TERRAIN_SOURCE)
+	var complete := source.texture.get_size() == Vector2(WorldData.Terrain.size() * Balance.TILE, TilesetBuilder.TERRAIN_VARIANTS * Balance.TILE)
+	var collision_ok := true
+	for terrain in WorldData.Terrain.size():
+		for variant in TilesetBuilder.TERRAIN_VARIANTS:
+			var coords := Vector2i(terrain, variant)
+			if not source.has_tile(coords):
+				complete = false
+				continue
+			var tile := source.get_tile_data(coords, 0)
+			var expected := 1 if terrain == WorldData.Terrain.WATER else 0
+			collision_ok = collision_ok and tile.get_collision_polygons_count(TilesetBuilder.WATER_PHYSICS_LAYER) == expected
+	_check(complete, "모든 지형·변형의 32×32 바닥 그림이 존재")
+	_check(collision_ok, "모든 물 변형에 충돌이 있고 육지 바닥에는 없음")
+	var used_variants: Dictionary = {}
+	var cells_ok := true
+	for cell in world.terrain_layer.get_used_cells():
+		var coords := world.terrain_layer.get_cell_atlas_coords(cell)
+		cells_ok = cells_ok and coords.x == world.data.get_terrain(cell) and source.has_tile(coords)
+		used_variants[coords.y] = true
+	_check(cells_ok and used_variants.size() == TilesetBuilder.TERRAIN_VARIANTS, "월드는 지형에 맞는 그림을 쓰고 모든 바닥 변형을 섞음")
 
 
 ## 왼쪽 두 칸이 비어 있는 나무 (왼쪽에서 오른쪽으로 공격하기 위해)
@@ -108,6 +189,12 @@ func _check_melee(main: Main) -> void:
 	await _frames(3)
 	Input.action_release("attack")
 	_check(target.hp < target.max_hp, "근거리 기본 공격이 앞의 적에게 맞음 (체력 %d/%d)" % [target.hp, target.max_hp])
+	_check(player._swing_time > 0.0 and player._swing_item == "rusty_sword" and player._swing_direction.is_normalized(),
+		"기본 검 타격과 함께 공격 방향·궤적 재생이 시작됨")
+	_check(Player.SWORD_TEXTURE.get_size() == Vector2(32, 16) and Player.SLASH_TEXTURE.get_size() == Vector2(448, 112),
+		"기본 검과 4프레임 공격 궤적의 그림이 로드됨")
+	await get_tree().create_timer(Player.SWING_SHOW_TIME + 0.02).timeout
+	_check(player._swing_time <= 0.0, "버튼을 놓으면 공격 궤적이 재생 시간 뒤 종료됨")
 	target.queue_free()
 
 	var world := main.world
@@ -150,14 +237,9 @@ func _check_inventory(main: Main) -> void:
 		"핵 근처에 오면 가방 자원이 창고로 자동 입고")
 
 	player.global_position = kingdom.core.global_position + Vector2(0, 9 * Balance.TILE)
-	player.inventory.add({"gold": 5})
+	player.inventory.add({"copper": 5})
 	player.equipment.add_to_bag("iron_helm")
-	# 직전 피격·대시 무적이 남아 있을 수 있어 풀릴 때까지 시도한다
-	for attempt in 120:
-		player.take_damage(999999.0)
-		if player.is_dead:
-			break
-		await _frames(1)
+	await _kill_player(player)
 	_check(player.is_dead and player.inventory.is_empty() and player.equipment.bag.is_empty(), "죽으면 가방 자원과 가방 장비가 모두 사라짐 (사망 %s, 가방 %s, 장비 %s)" % [player.is_dead, player.inventory.amounts(), player.equipment.bag])
 
 
@@ -247,17 +329,16 @@ func _check_workbench(main: Main) -> void:
 		"0단계 레시피(낡은 활) 제작 → 가방")
 	_check(kingdom.craft("old_bow", player.global_position + Vector2(0, 10 * Balance.TILE), player.inventory, player.equipment) != "",
 		"제작대에서 멀면 제작 불가")
-	kingdom.known_materials.erase("gold")
-	_check(kingdom.craft("iron_helm", player.global_position, player.inventory, player.equipment) == "아직 모르는 레시피입니다",
-		"금을 얻기 전에는 철 투구 레시피를 모름")
-	var revealed := kingdom.discover({"gold": 1})
-	_check(revealed.has("iron_helm"), "금을 처음 얻으면 철 투구 레시피 공개 %s" % [revealed])
-	_check(kingdom.craft("iron_helm", player.global_position, player.inventory, player.equipment).contains("1단계"), "단계가 모자라면 제작 불가")
+	_check(kingdom.craft("chain_mail", player.global_position, player.inventory, player.equipment) == "아직 모르는 레시피입니다",
+		"구리·질긴 가죽을 얻기 전에는 사슬 갑옷 레시피를 모름")
+	var revealed := kingdom.discover({"copper": 1, "tough_hide": 1})
+	_check(revealed.has("chain_mail"), "바이옴 재료를 처음 얻으면 사슬 갑옷 레시피 공개 %s" % [revealed])
+	kingdom.add_resources({"copper": 20, "tough_hide": 10, "venom_sting": 10})
+	_check(kingdom.craft("chain_mail", player.global_position, player.inventory, player.equipment).contains("1단계"), "단계가 모자라면 제작 불가")
 
-	kingdom.add_resources({"gold": 20})
 	error = kingdom.upgrade_workbench(player.global_position, player.inventory)
-	_check(error == "" and kingdom.workbench_tier() == 1, "제작대 1단계 업그레이드 %s" % error)
-	_check(kingdom.craft("iron_helm", player.global_position, player.inventory, player.equipment) == "", "1단계가 되면 철 투구 제작")
+	_check(error == "" and kingdom.workbench_tier() == 1, "희귀 재료로 제작대 1단계 업그레이드 %s" % error)
+	_check(kingdom.craft("chain_mail", player.global_position, player.inventory, player.equipment) == "", "1단계가 되면 사슬 갑옷 제작")
 	_check(kingdom.demolish(cells[0]) != "" and kingdom.workbench_tier() == 1, "단계를 올린 제작대는 철거할 수 없음")
 
 	var interact := InputEventAction.new()
@@ -271,6 +352,101 @@ func _check_workbench(main: Main) -> void:
 	kingdom.buildings[cells[0]].take_damage(99999.0)
 	await _frames(2)
 	_check(kingdom.workbench_tier() == -1, "제작대가 부서지면 단계도 사라짐")
+
+
+## 경험치(D-015): 처치·채집·제작으로 얻고, 패시브가 실제 효과를 내며, 죽으면 쓰지 않은 경험치만 사라짐
+func _check_progression(main: Main) -> void:
+	var player := main.player
+	var progression := player.progression
+	var world := main.world
+	player.global_position = player.spawn_point
+	await _frames(2)
+	progression.lose_unspent()
+
+	var tree_cell := _find_tree(world)
+	Melee.swing(get_tree(), world.cell_center(tree_cell) - Vector2(40, 0), Vector2.RIGHT, {"damage": 999.0, "range": 52.0, "arc": 120.0})
+	await _frames(2)
+	_check(progression.xp > 0, "채집하면 경험치 (경험치 %d)" % progression.xp)
+
+	var xp_before := progression.xp
+	var slime := Enemy.new().setup("slime", false)
+	slime.position = player.global_position + Vector2(200, 0)
+	main.get_node("Enemies").add_child(slime)
+	await _frames(1)
+	slime.take_damage(9999.0)
+	await _frames(2)
+	_check(progression.xp == xp_before + int(EnemyDB.TYPES["slime"]["xp"]), "적을 처치하면 경험치")
+
+	xp_before = progression.xp
+	var wolf := Enemy.new().setup("wolf", false)
+	wolf.position = player.global_position + Vector2(200, 0)
+	main.get_node("Enemies").add_child(wolf)
+	await _frames(1)
+	wolf.take_damage(9999.0, true)
+	await _frames(2)
+	_check(progression.xp == xp_before + Balance.tower_xp_share(EnemyDB.TYPES["wolf"]["xp"], 1), "탑이 잡은 적의 경험치도 플레이어 수로 나눠 받음 (1인)")
+
+	xp_before = progression.xp
+	Events.item_crafted.emit("old_bow")
+	_check(progression.xp == xp_before + Balance.XP_CRAFT_BY_TIER[0], "제작하면 경험치")
+
+	progression.add_xp(500)
+	var hp_before := player.max_hp()
+	progression.learn("vitality")
+	progression.learn("deep_pockets")
+	_check(player.max_hp() > hp_before and player.inventory.capacity() > Balance.INVENTORY_SLOTS, "강인함·큰 가방 패시브가 체력·가방에 적용")
+
+	progression.learn("wide_harvest")
+	progression.learn("wide_harvest")
+	var cluster := _find_tree_cluster(world)
+	if cluster.is_empty():
+		_check(false, "광역 채집 테스트용 나무 무리를 찾지 못함")
+	else:
+		var center: Vector2i = cluster[0]
+		player.global_position = world.cell_center(center) - Vector2(56, 0)
+		await _frames(2)
+		world.damage_objects_around(center, 999.0, progression.value("wide_harvest"))
+		var broken: Array = cluster.filter(func(c: Vector2i) -> bool: return world.data.get_object(c) == WorldData.Obj.NONE)
+		_check(broken.size() == cluster.size(), "광역 채집: 주변 나무까지 한 번에 채집 (%d/%d)" % [broken.size(), cluster.size()])
+
+	var interact := InputEventAction.new()
+	interact.action = "passives"
+	interact.pressed = true
+	Input.parse_input_event(interact)
+	await _frames(2)
+	_check(main.hud.passive_panel.visible, "K로 패시브 창이 열림")
+	main.hud.passive_panel.hide()
+
+	var vitality_rank := progression.rank("vitality")
+	progression.add_xp(7)
+	await _kill_player(player)
+	_check(player.is_dead and progression.xp == 0 and progression.rank("vitality") == vitality_rank,
+		"죽으면 쓰지 않은 경험치는 사라지고 배운 패시브는 남음")
+	await get_tree().create_timer(Balance.RESPAWN_TIME + 0.5).timeout
+
+
+## 주변(대각선 포함 1칸)에 나무가 하나 이상 있는 나무. [중심, 주변 나무들...]
+func _find_tree_cluster(world: World) -> Array:
+	for y in world.data.size.y:
+		for x in world.data.size.x:
+			var cell := Vector2i(x, y)
+			if world.data.get_object(cell) != WorldData.Obj.TREE:
+				continue
+			var cluster: Array = [cell]
+			for offset in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1), Vector2i(1, 1), Vector2i(-1, -1), Vector2i(1, -1), Vector2i(-1, 1)]:
+				if world.data.get_object(cell + offset) in World.HARVESTABLE:
+					cluster.append(cell + offset)
+			if cluster.size() >= 3:
+				return cluster
+	return []
+
+
+## 직전 피격·대시·부활 무적이 남아 있을 수 있어 풀릴 때까지(최대 4초) 시도한다
+func _kill_player(player: Player) -> void:
+	var deadline := Time.get_ticks_msec() + 4000
+	while not player.is_dead and Time.get_ticks_msec() < deadline:
+		player.take_damage(999999.0)
+		await _frames(1)
 
 
 func _wood(main: Main) -> int:
