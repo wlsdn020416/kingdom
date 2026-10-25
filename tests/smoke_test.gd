@@ -16,6 +16,7 @@ func _ready() -> void:
 	_check_object_tiles(main.world)
 	_check_health_bars(main)
 	_check_enemy_art(main)
+	_check_building_art(main)
 
 	_check(main.world.data.is_explored(main.world.data.core_cell), "시작 지점 주변이 지도에 탐험됨")
 
@@ -41,6 +42,7 @@ func _ready() -> void:
 
 	await _check_harvest(main)
 	await _check_melee(main)
+	await _check_equipment_panel(main)
 	await _check_build_menu(main)
 	await _check_storage(main)
 	await _check_workbench(main)
@@ -63,6 +65,109 @@ func _ready() -> void:
 
 	print("SMOKE TEST %s (실패 %d)" % ["PASS" if _failures == 0 else "FAIL", _failures])
 	get_tree().quit(1 if _failures > 0 else 0)
+
+
+## 실제 I 창에서 장착·해제·재료 스택·호버 설명·닫기가 함께 동작해야 한다.
+func _check_equipment_panel(main: Main) -> void:
+	var player := main.player
+	var panel := main.hud.equipment_panel
+	var previous_position := player.global_position
+	var previous_materials := player.inventory.amounts()
+	var previous_armor := player.equipment.item_in("armor")
+	main.spawner.set_physics_process(false)
+	player.global_position = main.kingdom.core.global_position + Vector2(0, 9 * Balance.TILE)
+	player.inventory.clear()
+	player.inventory.add({"wood": Balance.STACK_SIZE + 3})
+	player.equipment.add_to_bag("chain_mail")
+	player.equipment.add_to_bag("iron_helm")
+	var press := InputEventAction.new()
+	press.action = "equipment"
+	press.pressed = true
+	Input.parse_input_event(press)
+	await _frames(3)
+	_check(panel.visible and not player.attack_enabled and not get_tree().paused
+		and panel._slot_buttons.size() == ItemDB.SLOTS.size(), "I 창은 부위별 6칸으로 열리고 공격만 차단")
+	_check(panel._bag.columns == EquipmentPanel.GRID_COLUMNS and panel._bag.get_child_count() >= EquipmentPanel.MIN_GEAR_CELLS,
+		"장비 가방은 여섯 열 격자로 표시하고 빈칸은 용량 제한을 만들지 않음")
+	var armor_button: Button
+	var helm_button: Button
+	for button: Button in panel._bag.get_children():
+		var label := button.get_node_or_null("Name") as Label
+		if label != null and label.text == ItemDB.ITEMS["chain_mail"]["name"]:
+			armor_button = button
+		if label != null and label.text == ItemDB.ITEMS["iron_helm"]["name"]:
+			helm_button = button
+	if helm_button != null:
+		helm_button.mouse_entered.emit()
+	_check(panel._tooltip.visible and panel._highlighted_slot == "head" and panel._tooltip_name.text == "철 투구",
+		"장비 호버는 설명창과 장착될 부위를 함께 표시")
+	if armor_button != null:
+		armor_button.pressed.emit()
+	_check(player.equipment.item_in("armor") == "chain_mail"
+		and panel._slot_buttons["armor"].get_node("Name").text == "사슬 갑옷", "가방 칸 클릭은 장착 명령과 마네킹 표시를 갱신")
+	panel._slot_buttons["armor"].pressed.emit()
+	_check(player.equipment.item_in("armor") == "" and player.equipment.bag.has("chain_mail")
+		and panel._slot_buttons["weapon"].disabled, "착용 칸 클릭으로 해제하고 무기는 해제할 수 없음")
+	panel._tabs.current_tab = 1
+	await _frames(2)
+	_check(not panel._tooltip.visible and panel._materials.get_child_count() == player.inventory.capacity()
+		and panel._last_materials.get("wood", 0) == Balance.STACK_SIZE + 3 and player.inventory.used_slots() == 2,
+		"재료 탭은 실제 가방 용량과 50개씩 나눈 스택을 표시")
+	player.inventory.take("wood", Balance.STACK_SIZE)
+	panel._process(EquipmentPanel.MATERIAL_POLL_TIME)
+	_check(panel._last_materials.get("wood", 0) == 3 and panel._material_count.text.begins_with("1 /"),
+		"재료 소비·입고 변화는 열린 창에 즉시 반영")
+	panel._show_material_tooltip("wood", 3)
+	await _frames(3)
+	var viewport := panel.get_viewport_rect()
+	_check(panel._tooltip.visible and panel._tooltip_kind.text.contains("3개")
+		and viewport.encloses(panel._tooltip.get_rect()), "재료 설명은 수량을 표시하고 화면 밖으로 나가지 않음")
+	press = InputEventAction.new()
+	press.action = "ui_cancel"
+	press.pressed = true
+	Input.parse_input_event(press)
+	await _frames(2)
+	_check(not panel.visible and not panel._tooltip.visible and player.attack_enabled, "Esc는 장비창과 설명창을 닫고 공격을 복구")
+	player.inventory.clear()
+	player.inventory.add(previous_materials)
+	if previous_armor != "":
+		player.equipment.equip(previous_armor)
+	player.equipment.remove_from_bag("chain_mail")
+	player.equipment.remove_from_bag("iron_helm")
+	player.global_position = previous_position
+	main.spawner.set_physics_process(true)
+
+
+## 설치물과 제작대 모든 단계가 같은 한 칸 충돌 안에 그려져야 한다.
+func _check_building_art(main: Main) -> void:
+	var image := Building.SPRITE_TEXTURE.get_image()
+	var artwork_ok := image.get_size() == Vector2i((BuildingDB.ORDER.size() + RecipeDB.max_tier()) * 32, 64)
+	var regions: Dictionary = {}
+	var rules_ok := true
+	for id: String in BuildingDB.ORDER:
+		var info: Dictionary = BuildingDB.TYPES[id]
+		var count := RecipeDB.max_tier() + 1 if info.get("workbench", false) else 1
+		for tier in count:
+			var region := Building.sprite_region(id, tier)
+			artwork_ok = artwork_ok and not regions.has(region)
+			regions[region] = true
+			var painted := false
+			for y in int(region.size.y):
+				for x in int(region.size.x):
+					if image.get_pixel(int(region.position.x) + x, y).a > 0.0:
+						painted = true
+						artwork_ok = artwork_ok and y >= int(info["sprite_top"])
+			artwork_ok = artwork_ok and painted
+		var building := Building.new().setup(id, Vector2i.ZERO)
+		main.add_child(building)
+		building.set_physics_process(false)
+		var collider := building.get_child(0) as CollisionShape2D
+		rules_ok = rules_ok and (collider.shape as RectangleShape2D).size == Vector2(32, 32)
+		building.take_damage(1.0)
+		rules_ok = rules_ok and building.hp == float(info["hp"]) - 1.0
+		building.queue_free()
+	_check(artwork_ok and regions.size() == 8, "설치물 5종·제작대 4단계 그림과 체력바 높이가 유효")
+	_check(rules_ok, "설치물 그래픽 교체 후 한 칸 충돌과 피해 판정 유지")
 
 
 ## 모든 적의 그림이 존재하고 움직임·피격 표시가 기존 충돌과 피해 판정을 유지해야 한다.
@@ -301,6 +406,10 @@ func _check_build_menu(main: Main) -> void:
 	await _frames(2)
 	_check(main.hud.build_menu.visible and not main.build_mode.active and not get_tree().paused and not main.player.attack_enabled,
 		"B로 건설 메뉴가 열리고 게임은 멈추지 않음")
+	var icons_ok := main.hud.build_menu._list.get_child_count() == BuildingDB.ORDER.size()
+	for button: Button in main.hud.build_menu._list.get_children():
+		icons_ok = icons_ok and button.icon is AtlasTexture and (button.icon as AtlasTexture).atlas == Building.SPRITE_TEXTURE
+	_check(icons_ok, "B 메뉴는 실제 설치물과 같은 그림을 아이콘으로 사용")
 	main.hud.build_menu.choose("stone_wall")
 	await _frames(1)
 	_check(not main.hud.build_menu.visible and main.build_mode.active and main.build_mode.selected_type() == "stone_wall",
@@ -385,6 +494,8 @@ func _check_workbench(main: Main) -> void:
 
 	error = kingdom.upgrade_workbench(player.global_position, player.inventory)
 	_check(error == "" and kingdom.workbench_tier() == 1, "희귀 재료로 제작대 1단계 업그레이드 %s" % error)
+	var upgraded_region := Building.sprite_region("workbench", kingdom.workbench_tier())
+	_check(upgraded_region != Building.sprite_region("workbench", 0), "제작대 업그레이드 후 단계별 그림으로 전환")
 	_check(kingdom.craft("chain_mail", player.global_position, player.inventory, player.equipment) == "", "1단계가 되면 사슬 갑옷 제작")
 	_check(kingdom.demolish(cells[0]) != "" and kingdom.workbench_tier() == 1, "단계를 올린 제작대는 철거할 수 없음")
 
@@ -429,7 +540,7 @@ func _check_progression(main: Main) -> void:
 	wolf.position = player.global_position + Vector2(200, 0)
 	main.get_node("Enemies").add_child(wolf)
 	await _frames(1)
-	wolf.take_damage(9999.0, true)
+	wolf.take_damage(9999.0, Enemy.SOURCE_TOWER)
 	await _frames(2)
 	_check(progression.xp == xp_before + Balance.tower_xp_share(EnemyDB.TYPES["wolf"]["xp"], 1), "탑이 잡은 적의 경험치도 플레이어 수로 나눠 받음 (1인)")
 

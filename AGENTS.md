@@ -26,11 +26,11 @@
 | `src/enemies/` | 적과 AI | |
 | `src/kingdom/` | 왕국 핵, 건물, 건설 모드, 공용 자원 | |
 | `src/gameplay/` | 낮/밤, 웨이브, 상자 보상, 공유 지도 상태, 핑 | |
-| `src/multiplayer/` | 네트워크 연결과 동기화. 지금은 Steam 연결(`SteamService`, `Session`이 자식으로 소유) | 동기화 코드는 M1에서 추가 |
+| `src/multiplayer/` | 네트워크 연결과 동기화: Steam 연결(`SteamService`), 접속·명단(`NetSession`, 둘 다 `Session`이 자식으로 소유), 게임 씬 동기화(`PlayerSync`·`RemotePlayer` 플레이어, `CombatSync`·`EnemyPuppet` 적·시간·핵) | RPC는 이 폴더에만 (D-017) |
 | `addons/godotsteam/` | GodotSteam GDExtension (외부, MIT). macOS·Win64·Linux64 라이브러리만 포함 | 직접 고치지 않는다. 버전 교체는 D-016 절차 |
-| `src/ui/` | HUD, 스킬바, 건설 메뉴, 지도, 장비창, 장비 상자 창, 제작대 창, 패시브 창, 전략회의, 멸망 화면, 공용 UI 생성 함수(`UiKit`) | |
+| `src/ui/` | HUD, 스킬바, 건설 메뉴, 지도, 마네킹형 장비·소지품 창, 장비 상자 창, 제작대 창, 패시브 창, 전략회의, 멸망 화면, 공용 UI 생성 함수(`UiKit`) | |
 | `data/` | 밸런스 수치와 아이템·적·건물·레시피·패시브 정의 | 숫자 조정은 여기서만 |
-| `assets/` | 이미지·오디오·폰트. `branding/`(로고, 게임 아이콘), `characters/`(캐릭터 원본·시트, D-012), `kingdom/`(성 원본·PNG), `world/`(바닥 타일·생성물 원본·PNG), `combat/`(무기·공격 이펙트 원본·PNG), `ui/`(체력바 원본·PNG), `enemies/`(적 원본·시트) | 나머지 스프라이트는 M3(픽셀아트)에서 기능별 하위 폴더로 추가 |
+| `assets/` | 이미지·오디오·폰트. `branding/`(로고, 게임 아이콘), `characters/`(캐릭터 원본·시트, D-012), `kingdom/`(성·건설물 원본·PNG), `world/`(바닥 타일·생성물 원본·PNG), `combat/`(무기·공격 이펙트 원본·PNG), `ui/`(체력바·마네킹·슬롯·재료 아이콘 원본·PNG), `enemies/`(적 원본·시트) | 나머지 스프라이트는 M3(픽셀아트)에서 기능별 하위 폴더로 추가 |
 | `tests/` | 자동 검사(`run_all.sh`로 전부 실행) | `docs/TESTING.md` |
 | `tools/` | 개발 보조 스크립트(예: `world_stats.gd`) | 게임에 포함되지 않음 |
 | `docs/` | 기획서(`기획서.md`), 아키텍처·결정·로드맵·테스트 문서 | 기획서는 사용자가 관리 |
@@ -89,7 +89,7 @@
 모든 명령은 저장소 루트에서 실행한다. 자세한 설명은 `docs/TESTING.md`.
 
 ```sh
-sh tests/run_all.sh   # 전체: 스크립트·씬 로딩 검사 + 로직 테스트 + 게임 스모크 테스트 (약 25초)
+sh tests/run_all.sh   # 전체: 스크립트·씬 로딩 검사 + 로직 테스트 + 게임 스모크 테스트 + 2인 접속 테스트
 ```
 
 - 작업을 마치기 전에 반드시 실행하고, **출력에 나온 결과 그대로** 보고한다.

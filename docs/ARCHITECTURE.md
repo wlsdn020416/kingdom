@@ -5,7 +5,7 @@
 ## 1. 실행 흐름
 
 ```
-project.godot ─ 오토로드 Events(신호), Session(시드·씬 전환·입력 등록, 자식 SteamService = Steam 연결)
+project.godot ─ 오토로드 Events(신호), Session(시드·씬 전환·입력 등록, 자식 SteamService = Steam 연결, NetSession = 멀티플레이 접속·명단)
       │
       └─ run/main_scene = scenes/title.tscn ── 시드 입력 ── Session.start_game()
                                                             │
@@ -37,8 +37,10 @@ Main (Node2D, scenes/main.gd)          조립 지점: 모든 시스템의 setup(
 └─ Hud (CanvasLayer)                   UI 전체 (패널은 코드로 생성)
 ```
 
-`[이름]`은 노드 그룹. 코드에서 추가되는 그룹: `enemies`(Enemy), `lights`(Fx.add_light).
-`Enemy`, `Building`, `Projectile`, UI 패널은 `.tscn` 없이 코드로 생성한다. `Building`, `Projectile`, UI 패널은 `_draw()` 등으로 임시 도형을 그린다. 플레이어 몸은 `Player`가 코드로 붙이는 `Sprite2D`(`assets/characters/player.png`, D-012)가 그리고 `_draw()`는 무기·공격 궤적·보호막만 그린다.
+`[이름]`은 노드 그룹. 코드에서 추가되는 그룹: `enemies`(Enemy, 호스트에만), `lights`(Fx.add_light), `player`(RemotePlayer도 들어간다. 그래서 `player` 그룹을 `Player` 타입으로 가정하면 안 된다, D-017).
+`Enemy`, `Building`, `Projectile`, UI 패널은 `.tscn` 없이 코드로 생성한다. `Projectile`, UI 패널은 `_draw()` 등으로 임시 도형을 그린다. 플레이어 몸은 `Player`가 코드로 붙이는 `Sprite2D`(`assets/characters/player.png`, D-012)가 그리고 `_draw()`는 무기·공격 궤적·보호막만 그린다.
+
+건설물은 `assets/kingdom/buildings.aseprite`에서 내보낸 `buildings.png`(256×64)를 쓴다. 한 칸 32×64이며 나무벽·돌벽·화살탑·장비 상자·제작대 0~3단계 순서의 8칸이다. `BuildingDB.sprite_column`은 기본 칸, `sprite_top`은 체력바·메뉴 아이콘용 최상단이다. `Building.sprite_region()`이 제작대 단계에 맞는 칸을 선택하며 `draw_art()`를 실제 건물과 `BuildMode`가 공유한다. 그림 위치 `(-16, -48)`로 바닥을 기존 32×32 충돌 칸에 맞춘다. B 메뉴는 같은 원본에서 위쪽 투명 여백만 자른 아이콘을, 설치 미리보기는 반투명 그림과 기존 가능·불가 테두리를 쓴다. 건설·철거·보관·제작·화살탑 판정은 기존 소유 시스템이 유지한다.
 
 적은 `assets/enemies/enemies.aseprite`(64×64, 32프레임, 종류별 태그·레이어)에서 내보낸 `enemies.png`(256×512)를 쓴다. 4열은 움직임 프레임, 8행은 슬라임·고블린·거인·늑대·전갈·늪 슬라임·화염 정령·보스다. `EnemyDB`의 `sprite_row`가 행, `sprite_top`이 전체 프레임의 최상단 y좌표다. `Enemy._draw()`는 원래 크기로 `(-32, -40)`에 그리고 x 이동 방향으로 좌우 반전한다. 8fps로 걷고 정지 시 0번 칸으로 돌아간다(슬라임·늪 슬라임·불꽃·보스는 정지 중에도 움직임 유지). 체력바는 반전하지 않으며 뿔·불꽃을 포함한 그림 위에 둔다. 피격 시 기존 0.08초 동안 그림을 밝게 하며 AI·원형 충돌·공격·보상은 기존 시스템이 맡는다.
 
@@ -52,6 +54,10 @@ Main (Node2D, scenes/main.gd)          조립 지점: 모든 시스템의 setup(
 
 ## 3. 계층과 허용되는 의존 방향
 
+I 창 `EquipmentPanel`은 `Hud.setup()`에서 `Equipment`와 `Inventory`를 주입받는다. 처음 열 때만 UI를 구성하고, 왼쪽 마네킹의 6부위 슬롯과 오른쪽 장비·재료 탭을 보여준다. 장착·해제는 기존 Equipment 명령을 호출한다. 장비는 6열의 스크롤 격자이며 최소 24칸을 보여주되 실제 용량 제한을 추가하지 않는다. 재료는 기존 Inventory의 50개 스택·실제 칸 수를 그대로 표시한다. Inventory에는 변경 신호가 없으므로 열린 동안 0.2초마다 수량·용량을 비교해 갱신하고, 닫히면 처리와 툴팁을 중지한다.
+
+그래픽은 `assets/ui/equipment_ui.aseprite`·PNG(384×160)의 마네킹·슬롯 4상태와 `material_icons.aseprite`·PNG(24×24 12칸)를 쓴다. 장비 개별 아이콘은 사용자 요청으로 보류하고 이름을 표시한다. 장비 호버는 설명과 장착될 부위를 강조하고, 재료 호버는 스택 수량·총량을 보여준다. 툴팁은 마우스를 따라가며 화면 안에 제한하고 I·Esc·닫기로 함께 숨긴다. 패널은 UiKit의 다른 창을 바꾸지 않고 이 창 안에서만 스타일을 지정한다.
+
 체력바 공용 그리기는 `src/core/health_bar_art.gd`(`HealthBarArt`)가 맡는다. `assets/ui/health_bars.aseprite`에서 내보낸 32×20 PNG의 금속 테두리(32×8)와 빨강·금색·녹색 채움(각 26×4)을 사용한다. 월드 그리기는 양 끝 장식을 유지하며 폭을 늘리고, HUD는 같은 PNG의 `StyleBoxTexture`를 사용한다. 이 클래스는 전달받은 비율만 그리며 체력·표시 시간은 소유하지 않는다. 월드·적·건물에서 UI 계층을 참조하지 않도록 기반 계층에 둔다.
 
 채집물은 기존 `_hp_overlay`가 타일맵 위에 바를 그린다. 마지막 피해 후 4초, 파괴 시 제거라는 표시 규칙을 유지한다. 나무·단단한 나무는 중심에서 y=-40, 다른 채집물은 y=-24에 표시해 그림을 가리지 않는다. 적·건물의 손상 시 표시 조건과 HUD의 플레이어·왕국 수치는 기존 시스템이 맡는다.
@@ -62,7 +68,7 @@ Main (Node2D, scenes/main.gd)          조립 지점: 모든 시스템의 setup(
 | --- | --- | --- |
 | 조립 | `scenes/main.gd`, `scenes/title.gd` | 모든 것 |
 | UI | `src/ui/` | 아래 전부 (읽기 + 명령 메서드 호출). **아무도 UI에 의존하지 않는다** (조립 지점 제외) |
-| 네트워크 | `src/multiplayer/` (지금은 `SteamService`만) | 아래 전부. **게임 시스템은 네트워크에 의존하지 않는다** |
+| 네트워크 | `src/multiplayer/` (`SteamService`, `NetSession`, 게임 씬의 `PlayerSync`·`RemotePlayer`·`CombatSync`·`EnemyPuppet`, D-017) | 아래 전부. **게임 시스템은 네트워크에 의존하지 않는다** |
 | 흐름 | `src/gameplay/` | 왕국, 행위자, 월드, 데이터, core |
 | 왕국 | `src/kingdom/` | 행위자·전투, 월드, 데이터, core |
 | 행위자·전투 | `src/characters/`, `src/enemies/`, `src/combat/` | 월드, 데이터, core |
@@ -80,6 +86,7 @@ Main (Node2D, scenes/main.gd)          조립 지점: 모든 시스템의 setup(
 | `resources_gained` | World(채집), Main(상자·처치 보상) | Main(플레이어 `Inventory`에 추가, 떠오르는 글자). 창고 입고는 `Kingdom.deposit()` (D-014) |
 | `object_harvested` | World(플레이어가 오브젝트를 부숨) | Main(경험치, 풍요로운 손 추가 재료) (D-015) |
 | `item_crafted` | Kingdom(`craft()`) | Main(경험치) (D-015) |
+| `enemy_shot` | Projectile(적 탄 생성) | CombatSync(호스트: 참가자 화면에 같은 탄) (D-017) |
 | `chest_opened` | World | Main(보상 추첨) |
 | `map_cells_changed` | World, Kingdom | MapState |
 | `enemy_killed` | Enemy | Main(처치 수·금 보상) |

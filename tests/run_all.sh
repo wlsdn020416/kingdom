@@ -34,4 +34,24 @@ run "CHECK SCRIPTS" 120 res://tests/check_scripts.tscn
 run "LOGIC TEST" 60 --script res://tests/logic_test.gd
 run "SMOKE TEST" 180 res://tests/smoke_test.tscn
 
+# 멀티플레이 접속: 호스트와 참가자 두 프로세스를 동시에 띄워 서로의 결과를 본다 (D-017)
+net_log_host="$LOG_DIR/net_host.log"
+net_log_client="$LOG_DIR/net_client.log"
+# 앞 실행의 프로세스가 남아 있어도 엇갈려 붙지 않게 실행마다 포트를 바꾼다
+net_port=$((24700 + $$ % 2000))
+perl -e 'alarm shift; exec @ARGV' 60 "$GODOT" --headless --path . res://tests/net_test.tscn -- --role=host --port=$net_port > "$net_log_host" 2>&1 &
+host_pid=$!
+perl -e 'alarm shift; exec @ARGV' 60 "$GODOT" --headless --path . res://tests/net_test.tscn -- --role=client --port=$net_port > "$net_log_client" 2>&1
+client_code=$?
+wait $host_pid
+host_code=$?
+if [ $host_code -eq 0 ] && [ $client_code -eq 0 ] && grep -q "^NET HOST PASS" "$net_log_host" && grep -q "^NET CLIENT PASS" "$net_log_client" \
+	&& ! grep -q "SCRIPT ERROR" "$net_log_host" "$net_log_client"; then
+	echo "PASS  NET TEST"
+else
+	echo "FAIL  NET TEST (종료 코드 호스트 $host_code / 참가자 $client_code, 로그 $net_log_host $net_log_client)"
+	grep -hE "FAIL|SCRIPT ERROR|ERROR:" "$net_log_host" "$net_log_client" | head -20 | sed 's/^/      /'
+	failed=1
+fi
+
 exit $failed
