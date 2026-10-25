@@ -20,6 +20,10 @@ const ITEMS := {
 		"name": "낡은 검", "slot": "weapon",
 		"weapon": {"damage": 15.0, "rate": 2.5, "melee": true, "range": 52.0, "arc": 120.0},
 	},
+	"obsidian_blade": {
+		"name": "흑요석 검", "slot": "weapon",
+		"weapon": {"damage": 32.0, "rate": 2.5, "melee": true, "range": 62.0, "arc": 130.0},
+	},
 	"old_bow": {
 		"name": "낡은 활", "slot": "weapon",
 		"weapon": {"damage": 10.0, "rate": 4.0, "speed": 620.0},
@@ -46,6 +50,7 @@ const ITEMS := {
 		"skill": {"id": "shield", "name": "보호막", "cooldown": 12.0, "duration": 2.5},
 	},
 	"chain_mail": {"name": "사슬 갑옷", "slot": "armor", "hp": 40.0},
+	"flame_armor": {"name": "화염 갑옷", "slot": "armor", "hp": 80.0},
 	"cloth_shoes": {"name": "천 신발", "slot": "boots", "speed_bonus": 0.15},
 	"life_charm": {
 		"name": "생명의 부적", "slot": "charm",
