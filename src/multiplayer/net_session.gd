@@ -13,6 +13,8 @@ enum Mode { OFFLINE, ENET, STEAM }
 const MAX_PLAYERS := 4
 const DEFAULT_PORT := 24680
 const STEAM_VIRTUAL_PORT := 0
+const FRIEND_FLAG_IMMEDIATE := 4  # Steam 친구 목록의 "친구" (요청 중·차단 제외)
+const PERSONA_STATE_OFFLINE := 0
 
 var mode := Mode.OFFLINE
 ## peer id -> 표시 이름. 호스트가 정하고 모두에게 보낸다
@@ -35,6 +37,9 @@ func setup(steam: SteamService) -> void:
 		_steam.connect("lobby_created", _on_lobby_created)
 		_steam.connect("lobby_joined", _on_lobby_joined)
 		_steam.connect("join_requested", _on_join_requested)
+		# 친구 목록에서 "게임 참가"를 누르면 rich presence의 connect 문자열이 온다
+		if _steam.has_signal("join_game_requested"):
+			_steam.connect("join_game_requested", _on_join_game_requested)
 		_check_launch_invite()
 
 
@@ -59,10 +64,41 @@ func host_steam() -> void:
 	_steam.createLobby(_steam_const("LOBBY_TYPE_FRIENDS_ONLY", 1), MAX_PLAYERS)
 
 
-## 방을 만든 뒤 Steam 오버레이의 친구 초대 창을 연다
+## 방을 만든 뒤 Steam 오버레이의 친구 초대 창을 연다.
+## 오버레이는 Steam이 직접 실행한 게임에만 붙는다(터미널·에디터 실행, 특히 macOS는 대부분 안 붙음). 그때는 친구 목록 초대를 쓴다
 func invite_friends() -> void:
-	if _steam != null and lobby_id != 0:
+	if _steam == null or lobby_id == 0:
+		return
+	if overlay_available():
 		_steam.activateGameOverlayInviteDialog(lobby_id)
+	else:
+		_set_status("Steam 오버레이를 쓸 수 없습니다. 아래 친구 목록에서 초대하세요")
+
+
+func overlay_available() -> bool:
+	return _steam != null and _steam.has_method("isOverlayEnabled") and _steam.isOverlayEnabled()
+
+
+## 지금 온라인인 Steam 친구 [{"id", "name"}] (이름 순). Steam이 없으면 []
+func online_friends() -> Array:
+	var friends := []
+	if _steam == null or not _steam.has_method("getFriendCount"):
+		return friends
+	for i in _steam.getFriendCount(FRIEND_FLAG_IMMEDIATE):
+		var friend_id: int = _steam.getFriendByIndex(i, FRIEND_FLAG_IMMEDIATE)
+		if _steam.getFriendPersonaState(friend_id) != PERSONA_STATE_OFFLINE:
+			friends.append({"id": friend_id, "name": _steam.getFriendPersonaName(friend_id)})
+	friends.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return String(a["name"]).naturalnocasecmp_to(b["name"]) < 0)
+	return friends
+
+
+## 오버레이 없이 Steam 초대를 보낸다. 친구는 Steam 채팅에서 받고, 이 게임을 켜 둔 상태로 수락하면 들어온다
+func invite_friend(friend_id: int) -> void:
+	if _steam == null or lobby_id == 0 or not _steam.has_method("inviteUserToLobby"):
+		return
+	var sent: bool = _steam.inviteUserToLobby(lobby_id, friend_id)
+	var name: String = _steam.getFriendPersonaName(friend_id)
+	_set_status(("%s에게 초대를 보냈습니다" if sent else "%s에게 초대를 보내지 못했습니다") % name)
 
 
 func join_steam(target_lobby: int) -> void:
@@ -98,6 +134,8 @@ func join_enet(address: String, port := DEFAULT_PORT) -> void:
 func leave() -> void:
 	if _steam != null and lobby_id != 0:
 		_steam.leaveLobby(lobby_id)
+		if _steam.has_method("clearRichPresence"):
+			_steam.clearRichPresence()
 	lobby_id = 0
 	if multiplayer.multiplayer_peer != null and not multiplayer.multiplayer_peer is OfflineMultiplayerPeer:
 		multiplayer.multiplayer_peer.close()
@@ -169,6 +207,9 @@ func _on_lobby_created(result: int, new_lobby_id: int) -> void:
 		return
 	lobby_id = new_lobby_id
 	_steam.setLobbyData(lobby_id, "name", "%s의 왕국" % my_name())
+	# 친구가 Steam 친구 목록에서 "게임 참가"로도 들어올 수 있게 한다
+	if _steam.has_method("setRichPresence"):
+		_steam.setRichPresence("connect", "+connect_lobby %d" % lobby_id)
 	_use_peer(peer, Mode.STEAM)
 	_set_status("Steam 방을 만들었습니다. 친구를 초대하세요")
 	invite_friends()
@@ -194,6 +235,14 @@ func _on_lobby_joined(joined_lobby: int, _permissions: int, _locked, response: i
 ## 게임을 켜 둔 채 친구 초대를 수락했을 때
 func _on_join_requested(target_lobby: int, _friend_id: int) -> void:
 	join_steam(target_lobby)
+
+
+## Steam 친구 목록의 "게임 참가": connect 문자열 "+connect_lobby <id>"
+func _on_join_game_requested(_friend_id: int, connect: String) -> void:
+	var parts := connect.split(" ", false)
+	var index := parts.find("+connect_lobby")
+	if index >= 0 and index + 1 < parts.size():
+		join_steam(int(parts[index + 1]))
 
 
 ## 게임이 꺼진 상태에서 초대를 수락하면 Steam이 "+connect_lobby <id>"를 붙여 실행한다
