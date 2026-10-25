@@ -1,6 +1,10 @@
 class_name SoundDB
 extends RefCounted
-## 기본 효과음의 파일·음량·연속 재생 간격. 게임용 WAV와 생성 원본은 assets/audio/sfx/에 있다.
+## 효과음의 파일·음량·연속 재생 간격과 시작 화면 음악. 원본은 assets/audio/에 있다.
+
+const TITLE_MUSIC := preload("res://assets/audio/music/title_theme.ogg")
+const TITLE_MUSIC_VOLUME_DB := -8.0
+const TITLE_MUSIC_FADE_SECONDS := 1.6
 
 const ROOT := "res://assets/audio/sfx/"
 const GROUPS := {

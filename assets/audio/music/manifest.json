@@ -1,0 +1,32 @@
+{
+  "model": "eleven_music_v2_5",
+  "flow_id": "VauUUuMOYfcxU4DgK84O",
+  "prompt": "Instrumental medieval fantasy orchestral menu theme, gentle and noble with wistful hope, 76 BPM in D Dorian, warm lute arpeggios and felted harp beneath a memorable wooden flute melody, soft legato strings, distant mellow French horns and very restrained frame drum. Begin quietly, develop the melody with a modest warm swell in the middle, then return to the opening harmony and instrumentation for a calm repeatable ending; even dynamics, spacious intimate stereo reverb, no dramatic climax, no voices or choir, no sound effects, no electronic drums.",
+  "generations": [
+    {
+      "id": "57CJWkgl8wXuNW2aOVVE",
+      "source": "sources/title_theme_01.mp3",
+      "duration_secs": 90,
+      "selected": true
+    },
+    {
+      "id": "UNs7WrKHmqsBzyqBZ6Rn",
+      "source": "sources/title_theme_02.mp3",
+      "duration_secs": 90,
+      "selected": false
+    },
+    {
+      "id": "i0I1S2dqyUJi3i7I4J69",
+      "source": "sources/title_theme_03.mp3",
+      "duration_secs": 90,
+      "selected": false
+    },
+    {
+      "id": "fIBmCaRhQ4hPKHbRLOEV",
+      "source": "sources/title_theme_04.mp3",
+      "duration_secs": 90,
+      "selected": false
+    }
+  ],
+  "selection": "01은 1초 RMS 10~90분위 범위가 약 10.6dB로 네 변형 중 가장 작아 메뉴의 안정적인 음량을 우선해 선택. 최종 청음은 사용자 확인 필요."
+}

@@ -1,0 +1,17 @@
+{
+  "title": "왕국의 황혼",
+  "source": "sources/title_theme_01.mp3",
+  "output": "title_theme.ogg",
+  "sample_rate": 48000,
+  "channels": 2,
+  "duration_seconds": 74.28945833333333,
+  "requested_bpm": 76,
+  "source_start_seconds": 4.0,
+  "source_duration_seconds": 75.78947368421052,
+  "crossfade_seconds": 1.5,
+  "gain_db": -0.6609797475638288,
+  "peak_dbfs": -3.043395466514882,
+  "rms_dbfs": -20.041212396059862,
+  "boundary_delta": 0.003880724310874939,
+  "sha256": "9615e01393d750c7a31498d9931f7f00a7d51fbf05cad1fe103bdf7629b93b64"
+}

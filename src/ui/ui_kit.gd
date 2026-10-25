@@ -9,6 +9,7 @@ const TEXT := Color("ece6d2")
 const MUTED := Color("9ba28f")
 const ACCENT := Color("e3b341")
 const DANGER := Color("d4553a")
+const GAME_FONT := preload("res://assets/fonts/kingdom_dot.ttf")
 
 
 ## root를 화면 전체를 덮는 대화상자로 만들고, 내용을 넣을 VBox를 돌려준다

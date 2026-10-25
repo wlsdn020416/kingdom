@@ -7,8 +7,8 @@ const CONTROLS := [
 	["마우스", "조준 / 좌클릭 기본 공격 (나무·바위·광석도 공격해서 채집)"],
 	["Space", "대시 (이동 방향, 멈춰 있으면 조준 방향)"],
 	["1-4", "장비 액티브 스킬 (스킬 있는 장비만 빈칸 없이 배치)"],
-	["E", "상자 열기 · 장비 상자 · 제작대"],
-	["B", "건설 메뉴 (고른 건물 설치: 좌클릭 설치 · 우클릭 철거 · Esc 종료)"],
+	["E", "상자 열기 · 장비 상자 · 제작대 · 순간이동 탑"],
+	["B", "건설 메뉴 (벽·공성탑·생활 탭, 좌클릭 설치 · 우클릭 철거 · Esc 종료)"],
 	["R", "왕국 핵 근처에서 수리"],
 	["I", "장비창"],
 	["K", "패시브 (경험치로 배우기)"],
@@ -17,15 +17,20 @@ const CONTROLS := [
 	["N", "바로 밤으로 넘기기 (테스트용)"],
 ]
 const LOGO := preload("res://assets/branding/Logo.png")
-const LOGO_SIZE := Vector2(540, 360)  # 원본 1536×1024와 같은 비율
-const MENU_BUTTON_SIZE := Vector2(320, 56)
+const LOGO_SIZE := Vector2(520, 347)  # 원본 로고의 비율을 유지한다
+const MENU_BUTTON_SIZE := Vector2(360, 60)
+const BACKGROUND := preload("res://assets/branding/title_background.png")
+const MENU_DESIGN_SIZE := Vector2(560, 720)
 
 var _sound_effects := SoundEffects.new()
+var _menu_music := AudioStreamPlayer.new()
 var _single_popup := Control.new()
 var _single_seed: LineEdit
 var _multi_popup := Control.new()
 var _multi_seed: LineEdit
 var _multi_start: Button
+var _menu := Control.new()
+var _background := TextureRect.new()
 
 
 func _ready() -> void:
@@ -36,14 +41,37 @@ func _ready() -> void:
 		return
 	add_child(_sound_effects)
 	_sound_effects.setup(null, SoundDB.catalog())
+	_start_music()
 	Events.ui_sound_requested.connect(func(id: String) -> void: _sound_effects.play(id))
-	var background := ColorRect.new()
-	background.color = Color("0f1311")
-	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(background)
+	theme = MenuArt.theme()
+	_background.texture = BACKGROUND
+	_background.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_background.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	_background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_background.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_background)
+	var shade := TextureRect.new()
+	var gradient := Gradient.new()
+	gradient.set_color(0, Color(0.015, 0.025, 0.04, 0.62))
+	gradient.set_color(1, Color(0.015, 0.025, 0.04, 0.0))
+	var fade := GradientTexture2D.new()
+	fade.gradient = gradient
+	fade.fill_from = Vector2(0.0, 0.5)
+	fade.fill_to = Vector2(0.65, 0.5)
+	shade.texture = fade
+	shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(shade)
 	_build_menu()
 	_build_single_popup()
 	_build_multi_popup()
+	_skin_popup(_single_popup)
+	_skin_popup(_multi_popup)
+	for popup in [_single_popup, _multi_popup]:
+		popup.visibility_changed.connect(_update_menu_focus)
+		_sound_effects.watch_panel(popup)
+	resized.connect(_layout_menu)
+	_layout_menu()
 	# Steam 초대를 수락해 방에 들어오면 멀티플레이 팝업을 연다
 	Session.net.members_changed.connect(_on_net_changed)
 	Session.net.status_changed.connect(func(_text: String) -> void: _on_net_changed())
@@ -51,36 +79,102 @@ func _ready() -> void:
 		_open(_multi_popup)
 
 
+## 음악은 시작 화면이 소유한다. 팝업에서 이어지고 씬을 버리면 재생기도 함께 끝난다.
+func _start_music() -> void:
+	var stream := SoundDB.TITLE_MUSIC.duplicate() as AudioStreamOggVorbis
+	stream.loop = true
+	_menu_music.name = "MenuMusic"
+	_menu_music.stream = stream
+	_menu_music.volume_db = -60.0
+	add_child(_menu_music)
+	_menu_music.play()
+	create_tween().tween_property(_menu_music, "volume_db", SoundDB.TITLE_MUSIC_VOLUME_DB, SoundDB.TITLE_MUSIC_FADE_SECONDS)
+
+
 func _build_menu() -> void:
-	var center := CenterContainer.new()
-	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(center)
-	var column := VBoxContainer.new()
-	column.add_theme_constant_override("separation", 14)
-	column.alignment = BoxContainer.ALIGNMENT_CENTER
-	center.add_child(column)
+	_menu.size = MENU_DESIGN_SIZE
+	_menu.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_menu)
+	var kicker := UiKit.heading("\ue000  함께 세우고, 끝까지 지키는 왕국", 14, MenuArt.GOLD)
+	kicker.position = Vector2(60, 70)
+	kicker.size.x = 440
+	kicker.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_menu.add_child(kicker)
 	var logo := TextureRect.new()
-	logo.texture = LOGO
-	logo.custom_minimum_size = LOGO_SIZE
 	logo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	logo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	column.add_child(logo)
-	column.add_child(_menu_button("싱글플레이", func() -> void: _open(_single_popup)))
-	column.add_child(_menu_button("멀티플레이", func() -> void: _open(_multi_popup)))
+	logo.texture = LOGO
+	logo.position = Vector2(20, 100)
+	logo.size = LOGO_SIZE
+	logo.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_menu.add_child(logo)
+	var subtitle := UiKit.heading("낮에는 개척하고 · 밤에는 방어하세요", 15, MenuArt.TEXT)
+	subtitle.position = Vector2(40, 445)
+	subtitle.size.x = 480
+	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_menu.add_child(subtitle)
+	var single := _menu_button("싱글플레이", func() -> void: _open(_single_popup))
+	single.position = Vector2(100, 488)
+	_add_button_icon(single, MenuArt.SINGLE_ICON)
+	_menu.add_child(single)
+	var multi := _menu_button("멀티플레이", func() -> void: _open(_multi_popup))
+	multi.position = Vector2(100, 564)
+	_add_button_icon(multi, MenuArt.MULTI_ICON)
+	_menu.add_child(multi)
+	var foot := UiKit.heading("탐험 · 건설 · 성장 · 침공 방어", 12, MenuArt.MUTED)
+	foot.position = Vector2(60, 655)
+	foot.size.x = 440
+	foot.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_menu.add_child(foot)
 
 
 func _menu_button(text: String, on_pressed: Callable) -> Button:
 	var button := UiKit.button(text, on_pressed)
 	button.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	button.custom_minimum_size = MENU_BUTTON_SIZE
-	button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	button.add_theme_font_size_override("font_size", 22)
+	button.size = MENU_BUTTON_SIZE
+	button.add_theme_font_size_override("font_size", 20)
+	button.focus_mode = Control.FOCUS_ALL
 	return button
+
+
+func _add_button_icon(button: Button, region: Rect2) -> void:
+	var icon := TextureRect.new()
+	icon.texture = MenuArt.texture(region)
+	icon.position = Vector2(22, 14)
+	icon.size = Vector2(32, 32)
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	button.add_child(icon)
+	var arrow := TextureRect.new()
+	arrow.texture = MenuArt.texture(MenuArt.CHEVRON)
+	arrow.position = Vector2(MENU_BUTTON_SIZE.x - 36, 22)
+	arrow.size = Vector2(16, 16)
+	arrow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	button.add_child(arrow)
+
+
+func _layout_menu() -> void:
+	var fit := minf(size.x / 1280.0, size.y / MENU_DESIGN_SIZE.y)
+	_menu.scale = Vector2.ONE * fit
+	_menu.position = Vector2(maxf(0.0, (size.x - 1280.0 * fit) / 2.0), (size.y - MENU_DESIGN_SIZE.y * fit) / 2.0)
+
+
+func _skin_popup(popup: Control) -> void:
+	for node in popup.find_children("*", "PanelContainer", true, false):
+		(node as PanelContainer).add_theme_stylebox_override("panel", MenuArt.panel(24))
+
+
+func _update_menu_focus() -> void:
+	if not is_instance_valid(_menu):
+		return
+	var popup_open := _single_popup.visible or _multi_popup.visible
+	for node in _menu.find_children("*", "Button", true, false):
+		(node as Button).focus_mode = Control.FOCUS_NONE if popup_open else Control.FOCUS_ALL
 
 
 func _build_single_popup() -> void:
 	add_child(_single_popup)
-	var box := UiKit.dialog(_single_popup, "싱글플레이", 600.0)
+	var box := UiKit.dialog(_single_popup, "싱글플레이", 680.0)
 	box.add_child(UiKit.note("낮에는 탐험하고 자원을 모아 왕국을 강화하고, 밤에는 몰려오는 적과 보스로부터 왕국을 지키세요. 왕국이 무너지면 새 월드에서 처음부터 다시 시작합니다."))
 	if Session.last_result != "":
 		box.add_child(UiKit.heading("지난 판: " + Session.last_result, 14, UiKit.DANGER))
@@ -92,11 +186,13 @@ func _build_single_popup() -> void:
 
 func _build_multi_popup() -> void:
 	add_child(_multi_popup)
-	var box := UiKit.dialog(_multi_popup, "멀티플레이", 600.0)
+	var box := UiKit.dialog(_multi_popup, "멀티플레이", 680.0)
 	box.add_child(UiKit.note("방을 만들거나 참가한 뒤, 호스트가 시작하면 모두 같은 월드에서 시작합니다. 시드는 호스트의 것을 씁니다."))
 	box.add_child(LobbyPanel.new().setup(Session.net))
 	var steam_color := UiKit.ACCENT if Session.steam.available else UiKit.MUTED
-	box.add_child(UiKit.heading("Steam: " + Session.steam.status_text, 13, steam_color))
+	var steam_note := UiKit.note("Steam: " + Session.steam.status_text)
+	steam_note.add_theme_color_override("font_color", steam_color)
+	box.add_child(steam_note)
 	_multi_seed = _seed_row(box, _start_multi)
 	_multi_start = UiKit.button("시작", _start_multi)
 	box.add_child(_popup_buttons(_multi_start, _multi_popup))

@@ -79,7 +79,7 @@ func _get_tooltip(at_position: Vector2) -> String:
 
 
 func _draw_skill_bar() -> void:
-	var font := ThemeDB.fallback_font
+	var font := UiKit.GAME_FONT
 	var equipment := _player.equipment
 	var bar := equipment.skill_bar()
 	var dock := Rect2(Vector2((size.x - ROW_WIDTH) * 0.5 - DOCK_PADDING, 0), Vector2(ROW_WIDTH + DOCK_PADDING * 2, DOCK_HEIGHT))
@@ -102,7 +102,7 @@ func _draw_skill_bar() -> void:
 
 
 func _draw_skill_slot(rect: Rect2, key: String, skill_id: String, skill_name: String, cooldown_left: float, cooldown: float, action: String) -> void:
-	var font := ThemeDB.fallback_font
+	var font := UiKit.GAME_FONT
 	var state := SlotState.READY
 	if skill_id.is_empty():
 		state = SlotState.EMPTY
@@ -130,7 +130,7 @@ func _draw_skill_slot(rect: Rect2, key: String, skill_id: String, skill_name: St
 
 
 func _draw_build_bar() -> void:
-	var font := ThemeDB.fallback_font
+	var font := UiKit.GAME_FONT
 	var info: Dictionary = BuildingDB.TYPES[_build_mode.selected_type()]
 	var rect := Rect2(Vector2((size.x - BUILD_SLOT_SIZE.x) * 0.5, size.y - BUILD_SLOT_SIZE.y), BUILD_SLOT_SIZE)
 	draw_rect(rect, Color("273544"))
