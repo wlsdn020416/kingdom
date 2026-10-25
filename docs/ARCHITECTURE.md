@@ -38,9 +38,21 @@ Main (Node2D, scenes/main.gd)          조립 지점: 모든 시스템의 setup(
 ```
 
 `[이름]`은 노드 그룹. 코드에서 추가되는 그룹: `enemies`(Enemy), `lights`(Fx.add_light).
-`Enemy`, `Building`, `Projectile`, UI 패널은 `.tscn` 없이 코드로 생성하고 `_draw()`로 임시 도형을 그린다. 플레이어 몸은 `Player`가 코드로 붙이는 `Sprite2D`(`assets/characters/player.png`, D-012)가 그리고 `_draw()`는 무기 방향·공격 궤적·보호막만 그린다.
+`Enemy`, `Building`, `Projectile`, UI 패널은 `.tscn` 없이 코드로 생성하고 `_draw()`로 임시 도형을 그린다. 플레이어 몸은 `Player`가 코드로 붙이는 `Sprite2D`(`assets/characters/player.png`, D-012)가 그리고 `_draw()`는 무기·공격 궤적·보호막만 그린다.
+
+기본 낡은 검은 `assets/combat/rusty_sword.png`(32×16), 궤적은 `sword_slash.png`(112×112 4칸, 가로 448×112)를 쓴다. 같은 폴더에 각각의 `.aseprite` 원본이 있다. `Player._draw_rusty_sword()`가 기존 0.12초 동안 4프레임을 재생하고 검을 회전시킨다. 판정이 즉시 끝나므로 첫 프레임부터 사거리 52·120도 전체 궤적을 보이며 공격 시 방향을 저장해 조준을 바꾸어도 유지한다. 부모의 그리기를 자식 몸 스프라이트가 덮어 손잡이를 몸 안쪽에 가린다. 다른 무기는 기존 선·호를 사용한다. 피해·채집은 기존 `Melee.swing()`이 맡는다.
+
+왕국 핵 `Core`는 `_draw()`에서 `assets/kingdom/castle.png`를 원래 크기(96×128)로 그린다. 원본은 같은 폴더의 `castle.aseprite`이며 기단·중앙 성채·성문과 전면 성벽·양쪽 첨탑·깃발과 횃불 레이어로 나뉜다. 그리기 위치 `(-48, -84)`는 기단을 기존 96×96 충돌 영역 안에 맞추고 탑을 위로 올린다. 충돌·체력·조명·멸망 처리는 기존 `Core`가 맡는다.
+
+바닥은 `assets/world/terrain.aseprite`에서 내보낸 `terrain.png`(288×128)를 사용한다. 한 칸 32×32이며 열은 `WorldData.Terrain` 순서(9종), 행은 질감 변형 4종이다. `TilesetBuilder`가 모든 칸과 물 충돌을 등록하고 `World.setup()`은 좌표 해시로 변형을 고른다. 게임용 난수를 소비하지 않으며 월드 데이터는 바꾸지 않는다. 지도 색은 `Palette.TERRAIN`이 맡는다. 서로 다른 지형 사이의 경계는 현재 타일 칸 단위다.
+
+생성물은 `assets/world/objects.aseprite`에서 내보낸 `objects.png`(288×48)를 쓴다. 한 칸 32×48, `WorldData.Obj` 순서의 가로 9칸이며 NONE 칸은 투명하고 나머지 8종은 종류별 레이어로 분리한다. `TilesetBuilder`가 `texture_origin = (0, -8)`로 그림 바닥을 32×32 지형 칸에 맞춘다. 채집·상자 칸의 28×28 충돌과 `World.damage_object()`·`open_chest()` 처리는 그대로 사용한다.
 
 ## 3. 계층과 허용되는 의존 방향
+
+체력바 공용 그리기는 `src/core/health_bar_art.gd`(`HealthBarArt`)가 맡는다. `assets/ui/health_bars.aseprite`에서 내보낸 32×20 PNG의 금속 테두리(32×8)와 빨강·금색·녹색 채움(각 26×4)을 사용한다. 월드 그리기는 양 끝 장식을 유지하며 폭을 늘리고, HUD는 같은 PNG의 `StyleBoxTexture`를 사용한다. 이 클래스는 전달받은 비율만 그리며 체력·표시 시간은 소유하지 않는다. 월드·적·건물에서 UI 계층을 참조하지 않도록 기반 계층에 둔다.
+
+채집물은 기존 `_hp_overlay`가 타일맵 위에 바를 그린다. 마지막 피해 후 4초, 파괴 시 제거라는 표시 규칙을 유지한다. 나무·단단한 나무는 중심에서 y=-40, 다른 채집물은 y=-24에 표시해 그림을 가리지 않는다. 적·건물의 손상 시 표시 조건과 HUD의 플레이어·왕국 수치는 기존 시스템이 맡는다.
 
 위에서 아래로만 의존한다. 같은 층끼리는 필요할 때만, 순환 없이.
 
@@ -53,7 +65,7 @@ Main (Node2D, scenes/main.gd)          조립 지점: 모든 시스템의 setup(
 | 왕국 | `src/kingdom/` | 행위자·전투, 월드, 데이터, core |
 | 행위자·전투 | `src/characters/`, `src/enemies/`, `src/combat/` | 월드, 데이터, core |
 | 월드 | `src/world/` | 데이터, core |
-| 데이터 | `data/` | 원칙적으로 없음 (`EnemyDB`가 `WorldData.Terrain` enum만 참조) |
+| 데이터 | `data/` | 원칙적으로 없음 (`EnemyDB`·`Loot` 표가 `WorldData.Terrain` enum만 참조) |
 | 기반 | `src/core/` | 엔진만. 게임 규칙 없음 |
 
 시스템 사이의 연결 방식:
@@ -64,6 +76,8 @@ Main (Node2D, scenes/main.gd)          조립 지점: 모든 시스템의 setup(
 | 신호 | 보내는 곳 | 받는 곳 |
 | --- | --- | --- |
 | `resources_gained` | World(채집), Main(상자·처치 보상) | Main(플레이어 `Inventory`에 추가, 떠오르는 글자). 창고 입고는 `Kingdom.deposit()` (D-014) |
+| `object_harvested` | World(플레이어가 오브젝트를 부숨) | Main(경험치, 풍요로운 손 추가 재료) (D-015) |
+| `item_crafted` | Kingdom(`craft()`) | Main(경험치) (D-015) |
 | `chest_opened` | World | Main(보상 추첨) |
 | `map_cells_changed` | World, Kingdom | MapState |
 | `enemy_killed` | Enemy | Main(처치 수·금 보상) |

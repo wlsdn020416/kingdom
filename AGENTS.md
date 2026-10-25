@@ -19,17 +19,17 @@
 | 폴더 | 책임 | 비고 |
 | --- | --- | --- |
 | `scenes/` | 진입점과 메뉴 씬. `title.tscn`(시작 화면), `main.tscn`(한 판, 시스템 조립) | `main.gd`가 조립 지점(composition root) |
-| `src/core/` | 전역 시스템: `Events`·`Session` 오토로드, 입력 배치, 충돌 레이어, 임시 이펙트 | 게임 규칙을 넣지 않는다 |
+| `src/core/` | 전역 시스템: `Events`·`Session` 오토로드, 입력 배치, 충돌 레이어, 임시 이펙트, 공용 체력바 그리기(`HealthBarArt`) | 게임 규칙을 넣지 않는다 |
 | `src/world/` | 월드 데이터·생성·타일맵·색 | `WorldData`, `WorldGenerator`는 노드 없음 |
-| `src/characters/` | 플레이어, 장비(`Equipment`), 개인 자원(`Inventory`) | |
+| `src/characters/` | 플레이어, 장비(`Equipment`), 개인 자원(`Inventory`), 경험치·패시브(`Progression`) | |
 | `src/combat/` | 투사체, 장비 스킬 효과 | |
 | `src/enemies/` | 적과 AI | |
 | `src/kingdom/` | 왕국 핵, 건물, 건설 모드, 공용 자원 | |
 | `src/gameplay/` | 낮/밤, 웨이브, 상자 보상, 공유 지도 상태, 핑 | |
 | `src/multiplayer/` | 네트워크 연결과 동기화 | **아직 없음.** 멀티플레이 작업을 시작할 때 만든다 |
-| `src/ui/` | HUD, 스킬바, 건설 메뉴, 지도, 장비창, 장비 상자 창, 제작대 창, 전략회의, 멸망 화면, 공용 UI 생성 함수(`UiKit`) | |
-| `data/` | 밸런스 수치와 아이템·적·건물·레시피 정의 | 숫자 조정은 여기서만 |
-| `assets/` | 이미지·오디오·폰트. `branding/`(로고, 게임 아이콘), `characters/`(캐릭터 `.aseprite` 원본과 내보낸 시트, D-012) | 나머지 스프라이트·타일셋은 M3(픽셀아트)에서 기능별 하위 폴더로 추가 |
+| `src/ui/` | HUD, 스킬바, 건설 메뉴, 지도, 장비창, 장비 상자 창, 제작대 창, 패시브 창, 전략회의, 멸망 화면, 공용 UI 생성 함수(`UiKit`) | |
+| `data/` | 밸런스 수치와 아이템·적·건물·레시피·패시브 정의 | 숫자 조정은 여기서만 |
+| `assets/` | 이미지·오디오·폰트. `branding/`(로고, 게임 아이콘), `characters/`(캐릭터 원본·시트, D-012), `kingdom/`(성 원본·PNG), `world/`(바닥 타일·생성물 원본·PNG), `combat/`(무기·공격 이펙트 원본·PNG), `ui/`(체력바 원본·PNG) | 나머지 스프라이트는 M3(픽셀아트)에서 기능별 하위 폴더로 추가 |
 | `tests/` | 자동 검사(`run_all.sh`로 전부 실행) | `docs/TESTING.md` |
 | `tools/` | 개발 보조 스크립트(예: `world_stats.gd`) | 게임에 포함되지 않음 |
 | `docs/` | 기획서(`기획서.md`), 아키텍처·결정·로드맵·테스트 문서 | 기획서는 사용자가 관리 |
@@ -41,7 +41,7 @@
 기존 코드의 방식을 그대로 따른다.
 
 - 들여쓰기는 탭. 함수 사이 빈 줄 2개.
-- 파일명 `snake_case.gd`, 전역 클래스 `class_name PascalCase` (파일명과 같은 이름). 데이터 모음은 `XxxDB`(`ItemDB`, `EnemyDB`, `BuildingDB`, `RecipeDB`), 수치는 `Balance`.
+- 파일명 `snake_case.gd`, 전역 클래스 `class_name PascalCase` (파일명과 같은 이름). 데이터 모음은 `XxxDB`(`ItemDB`, `EnemyDB`, `BuildingDB`, `RecipeDB`, `PassiveDB`), 수치는 `Balance`.
 - 변수·함수 `snake_case`, 상수 `UPPER_SNAKE_CASE`, enum 타입 `PascalCase`·값 `UPPER_SNAKE_CASE`.
 - 외부에서 쓰지 않는 멤버는 `_` 접두사(`_cooldowns`, `_start_night()`).
 - 타입을 적는다: `var x := 1.0`, `func f(a: int) -> String`, `Array[String]`. 딕셔너리 값을 꺼낼 때는 `var name: String = ITEMS[id]["name"]`처럼 타입을 지정한다.
@@ -54,7 +54,7 @@
 
 ## 4. Scene / Node / Resource 설계 규칙
 
-- **Node는 생명주기와 엔진 연결(그리기, 물리, 입력)을 맡는다.** 순수 계산과 규칙은 `RefCounted` 또는 `static func`로 분리한다. 예: `WorldData`·`WorldGenerator`·`Equipment`·`Inventory`·`Loot`는 노드가 아니다.
+- **Node는 생명주기와 엔진 연결(그리기, 물리, 입력)을 맡는다.** 순수 계산과 규칙은 `RefCounted` 또는 `static func`로 분리한다. 예: `WorldData`·`WorldGenerator`·`Equipment`·`Inventory`·`Progression`·`Loot`는 노드가 아니다.
 - **의존성은 `setup()`으로 주입한다.** 시스템 노드는 필요한 다른 시스템을 `setup(world, kingdom, ...)` 인자로 받는다. 조립은 `scenes/main.gd`에서만 한다. `get_node("../..")`처럼 트리를 거슬러 올라가 다른 시스템을 찾지 않는다.
 - **이벤트는 `Events` 신호로 알린다.** "무슨 일이 일어났다"를 여러 곳이 들어야 할 때(`resources_gained`, `enemy_killed`, `core_destroyed`) 사용한다. 특정 대상에게 명령할 때는 신호가 아니라 메서드를 직접 호출한다. 새 신호는 `src/core/events.gd`에 인자 타입과 `##` 설명을 붙여 추가한다.
 - **그룹은 다수 객체 조회에만 쓴다.** 현재 그룹: `world`, `core`, `player`, `enemies`, `projectiles`, `fx_layer`, `lights`. 새 그룹을 만들면 `docs/ARCHITECTURE.md`에 추가한다.
@@ -68,7 +68,7 @@
 아직 네트워크 코드는 없다. 그러나 지금 작성하는 코드가 나중에 호스트 권한 구조로 옮겨질 수 있도록 아래를 지킨다.
 
 1. **호스트가 최종 결정한다:** 월드 상태(지형·오브젝트·탐험), 전투 결과(피해·사망), 자원 변경, 건설·철거, 게임 시간(낮/밤·웨이브), 보상 추첨, 승패.
-2. **상태 변경은 그 상태를 소유한 시스템의 명령 메서드 한 곳을 거친다.** 예: 건설·철거는 `Kingdom.build()`·`demolish()`, 장비 상자는 `Kingdom.store_item()`·`take_item()`, 제작은 `Kingdom.craft()`·`upgrade_workbench()`, 자원은 획득 시 `Inventory.add()`(Main이 `Events.resources_gained`를 받아 호출), 창고 입고는 `Kingdom.deposit()`, 지불은 `Kingdom.build()`·`repair()`의 `payer` 인자, 나무·바위 피해는 `World.damage_object()`, 피해는 `Enemy.take_damage()`·`Core.take_damage()`. 입력·UI 코드는 이 메서드를 호출할 뿐 상태 변수를 직접 바꾸지 않는다. 멀티플레이에서는 클라이언트의 요청을 호스트가 받아 같은 메서드를 호출하게 된다.
+2. **상태 변경은 그 상태를 소유한 시스템의 명령 메서드 한 곳을 거친다.** 예: 건설·철거는 `Kingdom.build()`·`demolish()`, 장비 상자는 `Kingdom.store_item()`·`take_item()`, 제작은 `Kingdom.craft()`·`upgrade_workbench()`, 패시브는 `Progression.learn()`, 자원은 획득 시 `Inventory.add()`(Main이 `Events.resources_gained`를 받아 호출), 창고 입고는 `Kingdom.deposit()`, 지불은 `Kingdom.build()`·`repair()`의 `payer` 인자, 나무·바위 피해는 `World.damage_object()`, 피해는 `Enemy.take_damage()`·`Core.take_damage()`. 입력·UI 코드는 이 메서드를 호출할 뿐 상태 변수를 직접 바꾸지 않는다. 멀티플레이에서는 클라이언트의 요청을 호스트가 받아 같은 메서드를 호출하게 된다.
 3. **명령 메서드는 검증을 포함한다.** 비용·범위·쿨타임 확인을 호출하는 쪽(UI)에만 두지 않는다. 클라이언트 요청은 신뢰하지 않는다.
 4. **게임 규칙에 네트워크 코드를 섞지 않는다.** `rpc`, `multiplayer.is_server()`, `MultiplayerSynchronizer`는 `src/multiplayer/` 또는 각 기능의 얇은 동기화 노드에만 둔다. 규칙 코드는 네트워크가 없어도(1인 플레이·테스트) 그대로 동작해야 한다.
 5. **결과에 영향을 주는 무작위는 호스트에서만 굴린다.** 월드 생성은 시드 기반 `RandomNumberGenerator`라서 모든 참가자가 같은 결과를 만든다(`tests/logic_test.gd`로 확인). 보상·드롭·웨이브 구성의 `randf()`는 호스트에서만 실행되고 결과가 전파되어야 한다. 화면 흔들림 같은 연출용 무작위는 각자 굴려도 된다.
