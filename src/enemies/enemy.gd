@@ -320,7 +320,8 @@ func _shoot(direction: Vector2, pattern: Dictionary, lifetime: float) -> void:
 
 ## 부하는 침공 적이라 핵으로 가고 아침에 사라진다. 너무 많이 쌓이지 않게 살아 있는 수를 센다
 func _summon(pattern: Dictionary) -> void:
-	_minions = _minions.filter(func(minion: Enemy) -> bool: return is_instance_valid(minion) and not minion._dying)
+	# 매개변수에 타입을 적으면 해제된 부하를 넘기는 순간 호출 자체가 실패하므로 타입 없이 받는다
+	_minions = _minions.filter(func(minion) -> bool: return is_instance_valid(minion) and not minion._dying)
 	var count := mini(pattern["count"], int(pattern["max_alive"]) - _minions.size())
 	for i in count:
 		var minion := Enemy.new().setup(pattern["minion"], true, minion_hp_scale, minion_damage_scale)

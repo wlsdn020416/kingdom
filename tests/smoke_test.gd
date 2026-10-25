@@ -1356,6 +1356,16 @@ func _check_bosses(main: Main) -> void:
 			boss._start_pattern(pattern)
 	await _frames(2)
 	_check(enemies.get_child_count() > enemy_count, "보스가 부하를 부름")
+	# 3일 밤 보스전에서 튕긴 원인: 사라진 부하가 목록에 남은 채 다시 소환하면 오류로 멈췄다
+	for minion: Enemy in boss._minions:
+		minion.take_damage(999999.0)
+	await _frames(2)
+	enemy_count = enemies.get_child_count()
+	for pattern: Dictionary in patterns:
+		if pattern["type"] == "summon":
+			boss._start_pattern(pattern)
+	await _frames(2)
+	_check(enemies.get_child_count() > enemy_count and boss._minions.all(is_instance_valid), "부하가 죽은 뒤에도 다시 부하를 부름")
 	for pattern: Dictionary in patterns:
 		if pattern["type"] == "charge":
 			boss._start_pattern(pattern)
