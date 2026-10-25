@@ -118,5 +118,4 @@ func _draw() -> void:
 			draw_rect(Rect2(-5, -5, 10, 10), Color("5b8fd6"))
 	var max_hp: float = info["hp"]
 	if hp < max_hp:
-		draw_rect(Rect2(-half + 2, -half - 4, 28, 3), Color(0, 0, 0, 0.6))
-		draw_rect(Rect2(-half + 2, -half - 4, 28 * hp / max_hp, 3), Color("6fcf6f"))
+		HealthBarArt.draw_bar(self, Vector2(-HealthBarArt.WIDTH / 2.0, -half - 12), hp / max_hp, HealthBarArt.Tone.GREEN)

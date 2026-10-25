@@ -3,6 +3,9 @@ extends StaticBody2D
 ## 왕국 핵 (3x3칸). 체력이 0이 되면 왕국 멸망.
 
 const LIGHT_RADIUS := 280.0
+const SPRITE_TEXTURE := preload("res://assets/kingdom/castle.png")
+## 기단을 기존 3×3칸 충돌 영역의 아래쪽에 맞추고 탑은 위로 솟게 한다.
+const SPRITE_OFFSET := Vector2(-48, -84)
 
 var max_hp := Balance.CORE_MAX_HP
 var hp := Balance.CORE_MAX_HP
@@ -24,11 +27,5 @@ func repair(amount: float) -> void:
 	hp = minf(max_hp, hp + amount)
 
 
-## 임시 그림. Phase 2에서 스프라이트로 교체.
 func _draw() -> void:
-	draw_rect(Rect2(-44, -28, 88, 72), Color("7a6a50"))
-	for i in 4:
-		draw_rect(Rect2(-44 + i * 24, -40, 16, 14), Color("9a8868"))
-	draw_rect(Rect2(-10, 10, 20, 34), Color("3a2c1c"))
-	draw_rect(Rect2(-2, -62, 3, 22), Color("d4553a"))
-	draw_rect(Rect2(1, -62, 14, 9), Color("d4553a"))
+	draw_texture(SPRITE_TEXTURE, SPRITE_OFFSET)
