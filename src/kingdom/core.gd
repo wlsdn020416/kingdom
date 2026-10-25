@@ -19,6 +19,8 @@ func take_damage(amount: float) -> void:
 	if hp <= 0.0:
 		return
 	hp = maxf(0.0, hp - amount)
+	if hp > 0.0:
+		Events.world_sound_requested.emit("core_hit", global_position)
 	if hp <= 0.0:
 		Events.core_destroyed.emit()
 
