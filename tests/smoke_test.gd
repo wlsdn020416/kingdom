@@ -26,8 +26,10 @@ func _ready() -> void:
 	Input.parse_input_event(dash_event)
 	await _frames(2)
 	_check(main.player.dash_cooldown_left() > 0.0, "Space 대시는 장비 없이 사용 가능, 사용 후 쿨타임")
+	main.player.equipment.add_to_bag("life_charm")
+	main.player.equipment.equip("life_charm")
 	main.player.use_skill(0)
-	_check(not main.player.equipment.is_ready("life_charm"), "스킬바 1번(치유) 사용 후 쿨타임")
+	_check(not main.player.equipment.is_ready("life_charm"), "장착한 치유 부적이 스킬바 1번, 사용 후 쿨타임")
 
 	var bag_before := main.player.equipment.bag.size()
 	var wood_before: int = main.kingdom.stock["wood"]

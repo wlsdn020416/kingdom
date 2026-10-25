@@ -12,7 +12,7 @@ const SLOT_NAMES := {
 }
 
 const STARTING_EQUIPMENT := {
-	"weapon": "rusty_sword", "head": "leather_cap", "charm": "life_charm",
+	"weapon": "rusty_sword", "head": "leather_cap",
 }
 
 const ITEMS := {

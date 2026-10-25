@@ -28,9 +28,9 @@ func _test_world_is_deterministic() -> void:
 func _test_skill_bar() -> void:
 	var equipment := Equipment.new()
 	_check(equipment.weapon().get("melee", false), "시작 무기는 근거리 무기")
-	_check(Array(equipment.skill_bar()) == ["life_charm"],
-		"시작 장비 스킬바 = 치유 (스킬 없는 장비는 자리 차지 안 함) %s" % [equipment.skill_bar()])
-	for id in ["fire_staff", "bomb_bag", "guardian_armor"]:
+	_check(equipment.skill_bar().is_empty(),
+		"시작 장비에는 스킬이 없음 (스킬 없는 장비는 자리 차지 안 함) %s" % [equipment.skill_bar()])
+	for id in ["fire_staff", "bomb_bag", "guardian_armor", "life_charm"]:
 		equipment.add_to_bag(id)
 		equipment.equip(id)
 	_check(Array(equipment.skill_bar()) == ["fire_staff", "bomb_bag", "guardian_armor", "life_charm"],
