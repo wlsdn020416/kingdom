@@ -74,7 +74,7 @@ func _effect(id: String, at: Vector2, size: float, angle: float) -> void:
 
 
 ## 호스트의 피해 숫자 묶음 [위치, 피해, 강조] (D-023)
-@rpc("authority", "unreliable")
+@rpc("authority", "reliable")
 func _hits(hits: Array) -> void:
 	hits_received += hits.size()
 	for hit: Array in hits:

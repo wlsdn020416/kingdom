@@ -83,8 +83,11 @@ class Runner extends Node:
 			await _until(func() -> bool: return _heard.has("shield"), deadline)
 			_check(_heard.count("shield") == 1, "호스트: 참가자 행동음이 그 사람 위치에서 한 번 전달됨")
 			_check(not _heard.has("core_destroyed"), "호스트: 참가자가 요청한 월드 멸망음은 허용 목록에서 거부됨")
-			Events.world_sound_requested.emit("upgrade", main.player.global_position)
-			main.player.sound_requested.emit("rally", main.player.global_position)
+			# 음원은 비신뢰 전송이다. 다음 검사 단계의 활 상태를 확인할 때까지 재알려 단발 손실로 후속 검사가 멈추지 않게 한다.
+			while Time.get_ticks_msec() < deadline and _remote(main).weapon_visual.weapon_id != "old_bow":
+				Events.world_sound_requested.emit("upgrade", main.player.global_position)
+				main.player.sound_requested.emit("rally", main.player.global_position)
+				await get_tree().create_timer(0.1).timeout
 		else:
 			# 임의의 월드 결과음을 요청해도 상태·오디오를 바꿀 수 없어야 한다.
 			main.combat_sync._relay_player_sound("core_destroyed", main.player.global_position)
