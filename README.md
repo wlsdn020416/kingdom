@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="Logo.png" alt="KINGDOM SYSTEM" width="480">
+  <img src="assets/branding/Logo.png" alt="KINGDOM SYSTEM" width="480">
 </p>
 
 # KINGDOM SYSTEM
