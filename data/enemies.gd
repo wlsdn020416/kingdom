@@ -38,8 +38,8 @@ const TYPES := {
 
 
 ## 밤 침공에 섞여 나오는 적. 날이 갈수록 강한 적이 섞인다.
-static func pick_invader(day: int) -> String:
-	var roll := randf()
+static func pick_invader(day: int, rng: RandomNumberGenerator) -> String:
+	var roll := rng.randf()
 	if day >= 3 and roll < 0.2:
 		return "brute"
 	if day >= 2 and roll < 0.5:
@@ -65,12 +65,12 @@ static func wanderer_for(terrain: int) -> String:
 
 ## 바이옴 적이 죽을 때 떨어뜨릴 희귀 재료. 없으면 {}
 ## bonus_chance: 약탈자 패시브로 더해지는 확률(0~1)
-static func roll_drop(type_id: String, bonus_chance := 0.0) -> Dictionary:
+static func roll_drop(type_id: String, rng: RandomNumberGenerator, bonus_chance := 0.0) -> Dictionary:
 	var drop: Dictionary = TYPES[type_id].get("drop", {})
-	if drop.is_empty() or randf() >= drop["chance"] + bonus_chance:
+	if drop.is_empty() or rng.randf() >= drop["chance"] + bonus_chance:
 		return {}
 	var resources := {}
 	for kind: String in drop["resources"]:
 		var range_: Array = drop["resources"][kind]
-		resources[kind] = randi_range(range_[0], range_[1])
+		resources[kind] = rng.randi_range(range_[0], range_[1])
 	return resources

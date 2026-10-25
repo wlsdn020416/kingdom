@@ -1,7 +1,7 @@
 class_name MapState
 extends RefCounted
 ## 팀이 공유하는 탐험 지도(1칸 = 1픽셀 이미지)와 핑.
-## 멀티플레이에서는 explored 정보와 pings를 동기화하면 모두 같은 지도를 보게 된다.
+## 멀티플레이에서는 MapSync가 탐험 칸을 서로 전하고, 핑은 호스트의 목록을 모두가 따른다 (D-018).
 
 signal pings_changed
 
@@ -44,6 +44,12 @@ func add_ping(cell: Vector2i) -> void:
 
 func clear_pings() -> void:
 	pings.clear()
+	pings_changed.emit()
+
+
+## 참가자: 호스트의 핑 목록을 그대로 따른다
+func set_pings(cells: Array) -> void:
+	pings.assign(cells)
 	pings_changed.emit()
 
 

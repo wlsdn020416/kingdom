@@ -1,7 +1,7 @@
 class_name Loot
 extends RefCounted
 ## 상자 보상 (D-014). 상자가 놓인 바이옴의 자원이 기본이고, 낮은 확률로 장비가 함께 나온다(이미 가진 장비도 나옴).
-## 장비는 주로 제작대에서 만든다. 결과에 영향을 주는 무작위라 멀티플레이에서는 호스트만 굴린다.
+## 장비는 주로 제작대에서 만든다. 결과에 영향을 주는 무작위라 호스트의 rng(Main.rng)로만 굴린다.
 
 const ITEM_CHANCE := 0.15
 
@@ -17,14 +17,15 @@ const BIOME_RESOURCES := {
 }
 
 
-## {"resources": {...}} 에 낮은 확률로 "item": id 가 더해진다
-static func roll_chest(terrain: int) -> Dictionary:
+## {"resources": {...}} 에 낮은 확률로 "item": id 가 더해진다. item_bonus: 보물 사냥꾼 패시브 (0.1 = +10%p)
+static func roll_chest(terrain: int, rng: RandomNumberGenerator, item_bonus := 0.0) -> Dictionary:
 	var table: Dictionary = BIOME_RESOURCES.get(terrain, BIOME_RESOURCES[WorldData.Terrain.GRASS])
 	var resources := {}
 	for kind: String in table:
 		var range_: Array = table[kind]
-		resources[kind] = randi_range(range_[0], range_[1])
+		resources[kind] = rng.randi_range(range_[0], range_[1])
 	var reward := {"resources": resources}
-	if randf() < ITEM_CHANCE:
-		reward["item"] = ItemDB.ITEMS.keys().pick_random()
+	if rng.randf() < ITEM_CHANCE + item_bonus:
+		var ids := ItemDB.ITEMS.keys()
+		reward["item"] = ids[rng.randi_range(0, ids.size() - 1)]
 	return reward

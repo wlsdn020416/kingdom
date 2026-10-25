@@ -2,7 +2,7 @@ class_name Kingdom
 extends Node2D
 ## 왕국 운영: 공용 자원(창고), 건물, 장비 상자, 제작대, 핵 수리.
 ## 비용은 지불하는 플레이어의 개인 인벤토리에서 먼저, 모자라면 공용 창고에서 낸다 (D-014).
-## 멀티플레이를 붙이면 이 상태(stock, buildings, known_materials, core.hp)를 호스트가 소유하고 동기화한다.
+## 멀티플레이에서는 호스트의 Kingdom만 명령 메서드로 바뀌고, 참가자는 apply_snapshot()으로 같은 상태를 받는다 (D-017 3단계).
 
 @onready var core: Core = $Core
 
@@ -71,12 +71,13 @@ func _spend(cost: Dictionary, payer: Inventory) -> void:
 		stock[kind] -= remaining
 
 
-## 성공하면 "", 실패하면 이유를 돌려준다
-func build(cell: Vector2i, type_id: String, builder_position: Vector2, payer: Inventory = null) -> String:
-	var cost: Dictionary = BuildingDB.TYPES[type_id]["cost"]
+## 성공하면 "", 실패하면 이유를 돌려준다.
+## perks: 짓는 사람의 건설 패시브(PassiveDB.build_perks). 비용 할인·건설 거리·건물 체력·자가 보수·가시·탑 속도 (D-020)
+func build(cell: Vector2i, type_id: String, builder_position: Vector2, payer: Inventory = null, perks := {}) -> String:
+	var cost := BuildingDB.discounted(BuildingDB.TYPES[type_id]["cost"], perks.get("discount", 0.0))
 	if not in_territory(cell):
 		return "왕국 영토(점선 원) 안에만 지을 수 있습니다"
-	if world.cell_center(cell).distance_to(builder_position) > Balance.BUILD_REACH:
+	if world.cell_center(cell).distance_to(builder_position) > Balance.BUILD_REACH + perks.get("reach", 0.0) * Balance.TILE:
 		return "너무 멉니다"
 	if not world.data.is_walkable(cell) or is_occupied(cell):
 		return "그 자리에는 지을 수 없습니다"
@@ -87,11 +88,12 @@ func build(cell: Vector2i, type_id: String, builder_position: Vector2, payer: In
 	if not can_afford(cost, payer):
 		return "자원이 부족합니다 (%s)" % Balance.format_cost(cost)
 	_spend(cost, payer)
-	var building := Building.new().setup(type_id, cell)
+	var building := Building.new().setup(type_id, cell, perks)
 	building.position = world.cell_center(cell)
 	building.destroyed.connect(_on_building_destroyed)
 	add_child(building)
 	buildings[cell] = building
+	Events.world_sound_requested.emit("build", building.global_position)
 	Events.map_cells_changed.emit([cell])
 	return ""
 
@@ -111,6 +113,7 @@ func demolish(cell: Vector2i) -> String:
 		stock[kind] += floori(cost[kind] * BuildingDB.REFUND_RATE)
 	buildings.erase(cell)
 	building.queue_free()
+	Events.world_sound_requested.emit("demolish", world.cell_center(cell))
 	Events.map_cells_changed.emit([cell])
 	return ""
 
@@ -157,12 +160,13 @@ func upgrade_workbench(actor_position: Vector2, payer: Inventory = null) -> Stri
 		return "업그레이드에는 %s 이(가) 필요합니다" % Balance.format_cost(cost)
 	_spend(cost, payer)
 	building.tier += 1
+	Events.world_sound_requested.emit("upgrade", building.global_position)
 	building.queue_redraw()
 	return ""
 
 
-## 장비를 만들어 equipment 가방에 넣는다. 성공하면 "", 실패하면 이유를 돌려준다
-func craft(recipe_id: String, actor_position: Vector2, payer: Inventory, equipment: Equipment) -> String:
+## 장비를 만들어 equipment 가방에 넣는다. 성공하면 "", 실패하면 이유를 돌려준다. crafter = 경험치를 받을 peer id
+func craft(recipe_id: String, actor_position: Vector2, payer: Inventory, equipment: Equipment, crafter := Enemy.SOURCE_LOCAL) -> String:
 	var cell := find_workbench_near(actor_position)
 	if cell == World.NO_CELL:
 		return "제작대 근처에서만 만들 수 있습니다"
@@ -175,7 +179,8 @@ func craft(recipe_id: String, actor_position: Vector2, payer: Inventory, equipme
 		return "자원이 부족합니다 (%s)" % Balance.format_cost(recipe["cost"])
 	_spend(recipe["cost"], payer)
 	equipment.add_to_bag(recipe_id)
-	Events.item_crafted.emit(recipe_id)
+	Events.world_sound_requested.emit("craft", world.cell_center(cell))
+	Events.item_crafted.emit(recipe_id, crafter)
 	return ""
 
 
@@ -209,6 +214,7 @@ func store_item(cell: Vector2i, equipment: Equipment, id: String, actor_position
 	if not equipment.remove_from_bag(id):
 		return "가방에 없는 장비입니다"
 	building.stored.append(id)
+	Events.world_sound_requested.emit("deposit", building.global_position)
 	return ""
 
 
@@ -221,6 +227,7 @@ func take_item(cell: Vector2i, equipment: Equipment, id: String, actor_position:
 	if not building.stored.has(id):
 		return "상자에 없는 장비입니다"
 	building.stored.erase(id)
+	Events.world_sound_requested.emit("deposit", building.global_position)
 	equipment.add_to_bag(id)
 	return ""
 
@@ -234,8 +241,8 @@ func _check_storage(cell: Vector2i, actor_position: Vector2) -> String:
 	return ""
 
 
-## 성공하면 "", 실패하면 이유를 돌려준다
-func repair(repairer_position: Vector2, payer: Inventory = null) -> String:
+## 성공하면 "", 실패하면 이유를 돌려준다. bonus: 보수 전문가 패시브 (0.5 = 수리량 +50%)
+func repair(repairer_position: Vector2, payer: Inventory = null, bonus := 0.0) -> String:
 	if repairer_position.distance_to(core.global_position) > Balance.REPAIR_RANGE:
 		return "왕국 핵 근처에서만 수리할 수 있습니다"
 	if core.hp >= core.max_hp:
@@ -243,9 +250,62 @@ func repair(repairer_position: Vector2, payer: Inventory = null) -> String:
 	if not can_afford(Balance.REPAIR_COST, payer):
 		return "수리에는 %s 이(가) 필요합니다" % Balance.format_cost(Balance.REPAIR_COST)
 	_spend(Balance.REPAIR_COST, payer)
-	core.repair(Balance.REPAIR_AMOUNT)
-	Fx.float_text(get_tree(), core.global_position + Vector2(0, -40), "+%d" % Balance.REPAIR_AMOUNT, Color("6fcf6f"))
+	var amount := Balance.REPAIR_AMOUNT * (1.0 + bonus)
+	core.repair(amount)
+	Events.world_sound_requested.emit("repair", core.global_position)
+	Fx.float_text(get_tree(), core.global_position + Vector2(0, -40), "+%d" % amount, Color("6fcf6f"))
 	return ""
+
+
+## 긴급 요새화 패시브: 모든 건물과 핵을 최대 체력의 ratio만큼 회복한다 (밤이 시작될 때 호스트가 부른다)
+func fortify(ratio: float) -> void:
+	if ratio <= 0.0:
+		return
+	for building: Building in buildings.values():
+		building.heal(building.max_hp * ratio)
+	core.repair(core.max_hp * ratio)
+
+
+## 참가자에게 보낼 상태. 직렬화할 수 있는 값만 담는다 (AGENTS 5절)
+func snapshot() -> Dictionary:
+	var list := []
+	for cell: Vector2i in buildings:
+		var building: Building = buildings[cell]
+		list.append([cell, building.type_id, building.hp, building.tier, building.stored.duplicate(), building.max_hp])
+	return {"stock": stock.duplicate(), "known": known_materials.duplicate(), "buildings": list}
+
+
+## 참가자: 호스트의 상태를 그대로 따른다. 건물은 비용 없이 만들거나 없앤다. known은 KingdomSync가 discover()로 반영한다
+func apply_snapshot(state: Dictionary) -> void:
+	stock = state["stock"]
+	var seen := {}
+	var changed: Array[Vector2i] = []
+	for entry: Array in state["buildings"]:
+		var cell: Vector2i = entry[0]
+		seen[cell] = true
+		var building: Building = buildings.get(cell)
+		if building != null and building.type_id != entry[1]:
+			buildings.erase(cell)
+			building.queue_free()
+			building = null
+		if building == null:
+			building = Building.new().setup(entry[1], cell)
+			building.position = world.cell_center(cell)
+			add_child(building)
+			buildings[cell] = building
+			changed.append(cell)
+		building.hp = entry[2]
+		building.max_hp = entry[5]
+		building.tier = entry[3]
+		building.stored.assign(entry[4])
+		building.queue_redraw()
+	for cell: Vector2i in buildings.keys():
+		if not seen.has(cell):
+			buildings[cell].queue_free()
+			buildings.erase(cell)
+			changed.append(cell)
+	if not changed.is_empty():
+		Events.map_cells_changed.emit(changed)
 
 
 func _someone_standing_on(cell: Vector2i) -> bool:

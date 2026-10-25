@@ -105,6 +105,7 @@ func take_damage(amount: float, source := SOURCE_LOCAL) -> void:
 	if _dying:
 		return
 	hp -= amount
+	Events.world_sound_requested.emit("enemy_death" if hp <= 0.0 else "hit_flesh", global_position)
 	_flash = 0.08
 	if hp <= 0.0:
 		_dying = true
@@ -112,6 +113,11 @@ func take_damage(amount: float, source := SOURCE_LOCAL) -> void:
 		Fx.burst(get_tree(), global_position, stats["color"], 12)
 		Events.enemy_killed.emit(self)
 		queue_free()
+
+
+## 처형자 패시브: 체력이 낮은 적에게 기본 공격 피해를 더한다. bonus = 0.25면 +25%
+func damage_after_execute(amount: float, bonus: float) -> float:
+	return amount * (1.0 + bonus) if bonus > 0.0 and hp <= max_hp * PassiveDB.EXECUTE_HP_RATIO else amount
 
 
 func knockback(impulse: Vector2) -> void:
@@ -161,7 +167,10 @@ func _attack_blockers() -> void:
 			var cell := _world.object_cell_near(collision.get_position() - collision.get_normal() * 2.0, 4.0)
 			if cell == World.NO_CELL:
 				continue
-			_world.damage_object(cell, stats["damage"], false)
+			_world.damage_object(cell, stats["damage"], World.NOBODY)
+		elif other is Building:
+			# 가시 벽 패시브가 때린 적에게 피해를 돌려줄 수 있게 공격자를 넘긴다
+			(other as Building).take_damage(stats["damage"], self)
 		elif other != null and other.has_method("take_damage"):
 			other.take_damage(stats["damage"])
 		else:

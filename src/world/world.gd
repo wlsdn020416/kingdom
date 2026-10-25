@@ -2,8 +2,16 @@ class_name World
 extends Node2D
 ## 월드를 타일맵으로 그리고, 채집·상자처럼 월드를 바꾸는 일을 처리한다.
 ## 상태는 data(WorldData)에 있고, 타일맵은 그걸 보여주기만 한다.
+## 멀티플레이에서는 호스트의 World만 오브젝트를 바꾸고, 참가자는 apply_object_state()로 결과만 받는다 (D-017 3단계).
+
+## 오브젝트 체력이 바뀌거나(hp > 0) 사라짐(hp = 0). 호스트의 WorldSync가 참가자에게 전달한다
+signal object_changed(cell: Vector2i, hp: float)
+## 내 캐릭터 주변을 새로 탐험함. MapSync가 다른 사람에게 전한다 (다른 사람이 밝힌 칸은 mark_explored로 들어오고 이 신호를 내지 않는다)
+signal cells_explored(cells: Array[Vector2i])
 
 const NO_CELL := Vector2i(-1, -1)
+## 채집 보상을 받을 사람이 없음 (적이 부숨). 그 밖의 harvester 값은 플레이어의 peer id (혼자 플레이면 1)
+const NOBODY := 0
 const HARVESTABLE := [
 	WorldData.Obj.TREE, WorldData.Obj.ROCK, WorldData.Obj.HARDWOOD_TREE, WorldData.Obj.COPPER_ORE,
 	WorldData.Obj.IRON_ORE, WorldData.Obj.MOSS, WorldData.Obj.OBSIDIAN,
@@ -15,14 +23,16 @@ const HARVESTABLE := [
 const HP_BAR_TIME := 4.0  # 마지막으로 맞은 뒤 채집물 체력 바가 보이는 시간(초)
 
 var data: WorldData
+var _rng: RandomNumberGenerator  # 채집 드롭용. Main.rng를 받는다
 var _last_reveal_center := NO_CELL
 var _hp_bar_time := {}  # Vector2i -> 남은 표시 시간
 ## 오브젝트 타일보다 위에 그려야 해서 별도 노드에 그린다 (World 자신의 _draw는 자식 타일맵 아래에 깔린다)
 var _hp_overlay := Node2D.new()
 
 
-func setup(world_data: WorldData) -> void:
+func setup(world_data: WorldData, rng: RandomNumberGenerator) -> void:
 	data = world_data
+	_rng = rng
 	_hp_overlay.z_index = 1
 	_hp_overlay.draw.connect(_draw_hp_bars)
 	add_child(_hp_overlay)
@@ -50,49 +60,61 @@ func bounds() -> Rect2:
 	return Rect2(Vector2.ZERO, Vector2(data.size * Balance.TILE))
 
 
-## 나무·바위·광석에 피해. 부서지면 플레이어가 부순 경우에만 자원을 준다.
-func damage_object(cell: Vector2i, amount: float, by_player: bool) -> void:
+## 나무·바위·광석에 피해. 부서지면 플레이어가 부순 경우(harvester != NOBODY)에만 재료를 준다.
+func damage_object(cell: Vector2i, amount: float, harvester: int) -> void:
 	var obj := data.get_object(cell)
 	if obj == WorldData.Obj.NONE:
 		return
 	if obj == WorldData.Obj.CHEST:
-		if by_player:
-			open_chest(cell)
+		if harvester != NOBODY:
+			open_chest(cell, harvester)
 		return
 	var i := data.index(cell)
+	var woody := obj in [WorldData.Obj.TREE, WorldData.Obj.HARDWOOD_TREE, WorldData.Obj.MOSS]
+	Events.world_sound_requested.emit("wood_hit" if woody else "stone_hit", cell_center(cell))
 	data.object_hp[i] -= amount
 	if data.object_hp[i] > 0.0:
-		_hp_bar_time[cell] = HP_BAR_TIME
-		_hp_overlay.queue_redraw()
+		_show_hp_bar(cell)
+		object_changed.emit(cell, data.object_hp[i])
 		return
-	if by_player and WorldData.OBJECT_DROPS.has(obj):
+	if harvester != NOBODY and WorldData.OBJECT_DROPS.has(obj):
 		var drops := {}
 		var base: Dictionary = WorldData.OBJECT_DROPS[obj]
 		for kind in base:
-			drops[kind] = base[kind] + randi_range(0, 1)
-		Events.resources_gained.emit(drops, cell_center(cell))
-		Events.object_harvested.emit(obj, cell)
-	Fx.burst(get_tree(), cell_center(cell), Palette.OBJECTS[obj])
-	_remove_object(cell)
+			drops[kind] = base[kind] + _rng.randi_range(0, 1)
+		Events.object_harvested.emit(obj, cell, drops, harvester)
+	Events.world_sound_requested.emit("tree_break" if woody else "rock_break", cell_center(cell))
+	_break_object(cell)
+
+
+## 참가자: 호스트가 정한 오브젝트 체력을 그대로 따른다. 0이면 부서진 것
+func apply_object_state(cell: Vector2i, hp: float) -> void:
+	if data.get_object(cell) == WorldData.Obj.NONE:
+		return
+	if hp <= 0.0:
+		_break_object(cell)
+		return
+	data.object_hp[data.index(cell)] = hp
+	_show_hp_bar(cell)
 
 
 ## 광역 채집 패시브: cell과 그 주변 radius칸 안의 나무·바위·광석에 같은 피해 (상자는 제외)
-func damage_objects_around(cell: Vector2i, amount: float, radius: float) -> void:
+func damage_objects_around(cell: Vector2i, amount: float, radius: float, harvester: int) -> void:
 	var reach := ceili(radius)
 	for y in range(-reach, reach + 1):
 		for x in range(-reach, reach + 1):
 			var offset := Vector2i(x, y)
 			var target := cell + offset
 			if offset == Vector2i.ZERO or (Vector2(offset).length() <= radius and data.get_object(target) in HARVESTABLE):
-				damage_object(target, amount, true)
+				damage_object(target, amount, harvester)
 
 
-func open_chest(cell: Vector2i) -> void:
+func open_chest(cell: Vector2i, opener: int) -> void:
 	if data.get_object(cell) != WorldData.Obj.CHEST:
 		return
-	_remove_object(cell)
-	Fx.burst(get_tree(), cell_center(cell), Palette.OBJECTS[WorldData.Obj.CHEST], 16)
-	Events.chest_opened.emit(cell_center(cell))
+	Events.world_sound_requested.emit("chest_open", cell_center(cell))
+	_break_object(cell)
+	Events.chest_opened.emit(cell_center(cell), opener)
 
 
 func find_chest_near(at: Vector2) -> Vector2i:
@@ -134,18 +156,42 @@ func reveal(at: Vector2) -> void:
 		return
 	_last_reveal_center = center
 	var r := Balance.REVEAL_RADIUS
-	var changed: Array[Vector2i] = []
+	var around: Array[Vector2i] = []
 	for y in range(center.y - r, center.y + r + 1):
 		for x in range(center.x - r, center.x + r + 1):
 			var cell := Vector2i(x, y)
-			if not data.in_bounds(cell) or (cell - center).length_squared() > r * r:
-				continue
-			var i := data.index(cell)
-			if data.explored[i] == 0:
-				data.explored[i] = 1
-				changed.append(cell)
+			if (cell - center).length_squared() <= r * r:
+				around.append(cell)
+	var changed := mark_explored(around)
+	if not changed.is_empty():
+		cells_explored.emit(changed)
+
+
+## 칸들을 탐험한 것으로 표시하고 새로 탐험된 칸만 돌려준다. 다른 사람이 밝힌 칸도 여기로 들어온다
+func mark_explored(cells: Array[Vector2i]) -> Array[Vector2i]:
+	var changed: Array[Vector2i] = []
+	for cell in cells:
+		if not data.in_bounds(cell):
+			continue
+		var i := data.index(cell)
+		if data.explored[i] == 0:
+			data.explored[i] = 1
+			changed.append(cell)
 	if not changed.is_empty():
 		Events.map_cells_changed.emit(changed)
+	return changed
+
+
+func _show_hp_bar(cell: Vector2i) -> void:
+	_hp_bar_time[cell] = HP_BAR_TIME
+	_hp_overlay.queue_redraw()
+
+
+func _break_object(cell: Vector2i) -> void:
+	var obj := data.get_object(cell)
+	Fx.burst(get_tree(), cell_center(cell), Palette.OBJECTS[obj], 16 if obj == WorldData.Obj.CHEST else 10)
+	_remove_object(cell)
+	object_changed.emit(cell, 0.0)
 
 
 func _remove_object(cell: Vector2i) -> void:

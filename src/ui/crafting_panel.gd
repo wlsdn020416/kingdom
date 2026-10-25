@@ -1,21 +1,26 @@
 class_name CraftingPanel
 extends Control
 ## 제작대 창 (제작대 옆에서 E). 공개된 레시피로 장비를 만들고 제작대 단계를 올린다.
-## 실제 처리는 Kingdom.craft()·upgrade_workbench()만 호출한다. 제작대에서 멀어지면 닫힌다.
+## 실제 처리는 KingdomSync를 거쳐 Kingdom.craft()·upgrade_workbench()만 호출한다. 제작대에서 멀어지면 닫힌다.
 
 const LIST_HEIGHT := 330.0  # 레시피가 늘어도 창이 화면(720) 안에 들어오게 목록만 스크롤
+const REFRESH_INTERVAL := 0.2
 
 var _kingdom: Kingdom
+var _commands: KingdomSync
 var _player: Player
 var _cell := World.NO_CELL
 var _title: Label
 var _upgrade: Button
 var _recipes: VBoxContainer
 var _hidden_note: Label
+var _refresh_timer := 0.0
+var _shown := []  # 마지막으로 그린 [단계, 알게 된 재료]. 바뀐 경우에만 버튼을 다시 만든다
 
 
-func setup(kingdom: Kingdom, player: Player) -> void:
+func setup(kingdom: Kingdom, player: Player, commands: KingdomSync) -> void:
 	_kingdom = kingdom
+	_commands = commands
 	_player = player
 	var box := UiKit.dialog(self, "제작대", 600.0)
 	_title = UiKit.heading("", 15, UiKit.ACCENT)
@@ -42,20 +47,25 @@ func open(cell: Vector2i) -> void:
 	_refresh()
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if visible and _kingdom.find_workbench_near(_player.global_position) != _cell:
 		hide()
+		return
+	# 멀티플레이 참가자는 단계·레시피 공개가 호스트에게서 나중에 오므로 열려 있는 동안 가끔 확인한다
+	_refresh_timer -= delta
+	if visible and _refresh_timer <= 0.0:
+		_refresh_timer = REFRESH_INTERVAL
+		if [_kingdom.workbench_tier(), _kingdom.known_materials.size()] != _shown:
+			_refresh()
 
 
 func _on_upgrade() -> void:
-	var error := _kingdom.upgrade_workbench(_player.global_position, _player.inventory)
-	Events.message.emit(error if error != "" else "제작대가 %d단계가 되었습니다" % _kingdom.workbench_tier())
+	_commands.upgrade_workbench()
 	_refresh()
 
 
 func _on_craft(recipe_id: String) -> void:
-	var error := _kingdom.craft(recipe_id, _player.global_position, _player.inventory, _player.equipment)
-	Events.message.emit(error if error != "" else "%s 제작! (I로 착용)" % ItemDB.ITEMS[recipe_id]["name"])
+	_commands.craft(recipe_id)
 	_refresh()
 
 
@@ -63,6 +73,7 @@ func _refresh() -> void:
 	if not visible or not _kingdom.buildings.has(_cell):
 		return
 	var tier := _kingdom.workbench_tier()
+	_shown = [tier, _kingdom.known_materials.size()]
 	_title.text = "현재 %d단계 / 최고 %d단계" % [tier, RecipeDB.max_tier()]
 	if tier >= RecipeDB.max_tier():
 		_upgrade.text = "최고 단계입니다"

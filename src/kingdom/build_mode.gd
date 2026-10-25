@@ -1,6 +1,10 @@
 class_name BuildMode
 extends Node2D
 ## 건물 설치 모드. 건설 메뉴(B)에서 건물을 고르면 start()로 켜진다. 좌클릭 설치(연속), 우클릭 철거.
+## 설치·철거는 신호로 요청만 하고, Main이 KingdomSync를 거쳐 Kingdom.build()·demolish()에 넘긴다 (참가자는 호스트에 요청).
+
+signal place_requested(cell: Vector2i, type_id: String)
+signal remove_requested(cell: Vector2i)
 
 var active := false
 
@@ -37,14 +41,10 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not active:
 		return
 	if event.is_action_pressed("attack"):
-		var error := _kingdom.build(_hovered_cell(), selected_type(), _player.global_position, _player.inventory)
-		if error != "":
-			Events.message.emit(error)
+		place_requested.emit(_hovered_cell(), selected_type())
 		get_viewport().set_input_as_handled()
 	elif event.is_action_pressed("build_remove"):
-		var error := _kingdom.demolish(_hovered_cell())
-		if error != "":
-			Events.message.emit(error)
+		remove_requested.emit(_hovered_cell())
 		get_viewport().set_input_as_handled()
 
 

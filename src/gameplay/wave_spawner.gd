@@ -1,6 +1,7 @@
 class_name WaveSpawner
 extends Node
 ## 밤 침공 웨이브와 낮에 돌아다니는 적을 만든다. 규모는 Balance에서 조정.
+## 적 구성·등장 위치는 결과에 영향을 주므로 호스트의 rng(Main.rng)로 굴린다. 참가자 쪽에서는 꺼져 있다 (D-017).
 
 const BOSS_SPAWN_TIME := 8.0
 const SPAWN_ATTEMPTS := 40
@@ -10,17 +11,19 @@ var _world: World
 var _kingdom: Kingdom
 var _player: Player
 var _enemy_parent: Node2D
+var _rng: RandomNumberGenerator
 var _queue: Array[Dictionary] = []  # {"type", "at", "hp_scale"}
 var _is_night := false
 var _night_time := 0.0
 var _wander_timer := 0.0
 
 
-func setup(world: World, kingdom: Kingdom, player: Player, enemy_parent: Node2D) -> void:
+func setup(world: World, kingdom: Kingdom, player: Player, enemy_parent: Node2D, rng: RandomNumberGenerator) -> void:
 	_world = world
 	_kingdom = kingdom
 	_player = player
 	_enemy_parent = enemy_parent
+	_rng = rng
 	Events.night_started.connect(_on_night_started)
 	Events.day_started.connect(_on_day_started)
 
@@ -54,7 +57,7 @@ func _on_night_started(day: int) -> void:
 	_queue.clear()
 	var size := Balance.wave_size(day)
 	for i in size:
-		_queue.append({"type": EnemyDB.pick_invader(day), "at": randf() * Balance.WAVE_SPAWN_WINDOW,
+		_queue.append({"type": EnemyDB.pick_invader(day, _rng), "at": _rng.randf() * Balance.WAVE_SPAWN_WINDOW,
 			"hp_scale": Balance.wave_hp_scale(day)})
 	if Balance.is_boss_night(day):
 		_queue.append({"type": "boss", "at": BOSS_SPAWN_TIME, "hp_scale": Balance.boss_hp_scale(day)})
@@ -83,7 +86,8 @@ func _spawn_wanderer() -> void:
 	if wanderers.size() >= Balance.WANDERER_MAX:
 		return
 	# 멀티플레이에서는 아무 플레이어 주변에나 나온다 (호스트 화면에 있는 RemotePlayer 포함, D-017)
-	var around: Node2D = get_tree().get_nodes_in_group("player").pick_random()
+	var players := get_tree().get_nodes_in_group("player")
+	var around: Node2D = players[_rng.randi_range(0, players.size() - 1)]
 	var at: Variant = _find_spawn(around.global_position, Balance.WANDERER_SPAWN_RING, true)
 	if at != null:
 		_spawn(EnemyDB.wanderer_for(_world.data.get_terrain(_world.cell_at(at))), at, false, 1.0)
@@ -93,12 +97,14 @@ func _spawn(type_id: String, at: Vector2, invader: bool, hp_scale: float) -> voi
 	var enemy := Enemy.new().setup(type_id, invader, hp_scale)
 	enemy.position = at
 	_enemy_parent.add_child(enemy)
+	if type_id == "boss":
+		Events.world_sound_requested.emit("boss_spawn", Vector2.INF)
 
 
 ## ring = 칸 단위 최소/최대 거리. 찾지 못하면 null
 func _find_spawn(center: Vector2, ring: Vector2, avoid_kingdom: bool) -> Variant:
 	for attempt in SPAWN_ATTEMPTS:
-		var offset := Vector2.from_angle(randf() * TAU) * randf_range(ring.x, ring.y) * Balance.TILE
+		var offset := Vector2.from_angle(_rng.randf() * TAU) * _rng.randf_range(ring.x, ring.y) * Balance.TILE
 		var cell := _world.cell_at(center + offset)
 		if not _world.data.is_walkable(cell) or _kingdom.is_occupied(cell):
 			continue
