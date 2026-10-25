@@ -58,14 +58,17 @@ func build(cell: Vector2i, type_id: String) -> void:
 	if _is_client():
 		_request_build.rpc_id(1, cell, type_id, _player.inventory.amounts())
 	else:
-		_report(_kingdom.build(cell, type_id, _player.global_position, _player.inventory, _player.progression.build_perks()))
+		var error := _kingdom.build(cell, type_id, _player.global_position, _player.inventory, _player.progression.build_perks())
+		_report(error)
+		if error == "":
+			_reward_builder(multiplayer.get_unique_id(), _player.progression.ranks, _kingdom.world.cell_center(cell))
 
 
 func demolish(cell: Vector2i) -> void:
 	if _is_client():
 		_request_demolish.rpc_id(1, cell)
 	else:
-		_report(_kingdom.demolish(cell))
+		_report(_kingdom.demolish(cell, _player.progression.value("salvage_expert") / 100.0))
 
 
 func store_item(cell: Vector2i, id: String) -> void:
@@ -103,14 +106,14 @@ func repair() -> void:
 	if _is_client():
 		_request_repair.rpc_id(1, _player.inventory.amounts())
 	else:
-		_report(_kingdom.repair(_player.global_position, _player.inventory, _player.progression.value("repair_expert") / 100.0))
+		_report(_kingdom.repair(_player.global_position, _player.inventory, _player.progression.repair_perks()))
 
 
 ## 핵 근처에 있으면 개인 자원을 창고로 옮긴다. 옮긴 양을 돌려준다 (참가자는 호스트 답을 받은 뒤 Main.show_deposit으로 알린다)
 func deposit() -> Dictionary:
 	if not _is_client():
 		return _kingdom.deposit(_player.inventory, _player.global_position)
-	var near := _player.global_position.distance_to(_kingdom.core.global_position) <= Balance.DEPOSIT_RANGE
+	var near := _kingdom.can_deposit_at(_player.global_position)
 	if near and not _deposit_pending and not _player.inventory.is_empty() and Time.get_ticks_msec() >= _deposit_retry_at:
 		_deposit_pending = true
 		_request_deposit.rpc_id(1, _player.inventory.amounts())
@@ -173,12 +176,26 @@ func _request_build(cell: Vector2i, type_id: String, held: Dictionary) -> void:
 	var payer := _claimed(held)
 	var error := _kingdom.build(cell, type_id, actor.global_position, payer, PassiveDB.build_perks(actor.ranks))
 	_reply(error, "", _spent(held, payer))
+	if error == "":
+		_reward_builder(actor.peer_id, actor.ranks, _kingdom.world.cell_center(cell))
+
+
+## 건축가의 깨달음 패시브: 지은 사람에게 경험치 (호스트가 정한다)
+func _reward_builder(peer_id: int, ranks: Dictionary, at: Vector2) -> void:
+	var xp := int(PassiveDB.value_in(ranks, "builders_insight"))
+	if xp <= 0:
+		return
+	if peer_id == multiplayer.get_unique_id():
+		_main.grant_reward(xp, {}, at)
+	else:
+		_main.combat_sync.send_reward(peer_id, xp, {}, at)
 
 
 @rpc("any_peer", "reliable")
 func _request_demolish(cell: Vector2i) -> void:
-	if _requester() != null:
-		_reply(_kingdom.demolish(cell))
+	var actor := _requester()
+	if actor != null:
+		_reply(_kingdom.demolish(cell, PassiveDB.value_in(actor.ranks, "salvage_expert") / 100.0))
 
 
 @rpc("any_peer", "reliable")
@@ -228,7 +245,7 @@ func _request_repair(held: Dictionary) -> void:
 	if actor == null:
 		return
 	var payer := _claimed(held)
-	var error := _kingdom.repair(actor.global_position, payer, PassiveDB.value_in(actor.ranks, "repair_expert") / 100.0)
+	var error := _kingdom.repair(actor.global_position, payer, PassiveDB.repair_perks(actor.ranks))
 	_reply(error, "", _spent(held, payer))
 
 

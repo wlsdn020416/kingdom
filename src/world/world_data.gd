@@ -16,8 +16,8 @@ const OBJECT_HP := {
 }
 ## 채집 보상 기본값. 실제로는 0~1개가 랜덤으로 더해진다.
 const OBJECT_DROPS := {
-	Obj.TREE: {"wood": 3}, Obj.ROCK: {"stone": 3}, Obj.HARDWOOD_TREE: {"hardwood": 2},
-	Obj.COPPER_ORE: {"copper": 2}, Obj.IRON_ORE: {"iron_ore": 2}, Obj.MOSS: {"moss": 2}, Obj.OBSIDIAN: {"obsidian": 2},
+	Obj.TREE: {"wood": 3}, Obj.ROCK: {"stone": 3}, Obj.HARDWOOD_TREE: {"hardwood": 2, "resin": 1},
+	Obj.COPPER_ORE: {"copper": 2, "coal": 1}, Obj.IRON_ORE: {"iron_ore": 2, "coal": 1}, Obj.MOSS: {"moss": 2}, Obj.OBSIDIAN: {"obsidian": 2},
 }
 
 var size: Vector2i

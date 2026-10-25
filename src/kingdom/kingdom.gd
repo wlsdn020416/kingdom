@@ -53,14 +53,48 @@ func add_resources(amounts: Dictionary) -> void:
 		stock[kind] = stock.get(kind, 0) + amounts[kind]
 
 
-## 핵 근처에 있으면 개인 자원을 전부 공용 창고로 옮기고 옮긴 양을 돌려준다
+## 핵이나 보급소(D-022) 근처에 있으면 개인 자원을 전부 공용 창고로 옮기고 옮긴 양을 돌려준다
 func deposit(inventory: Inventory, carrier_position: Vector2) -> Dictionary:
-	if inventory.is_empty() or carrier_position.distance_to(core.global_position) > Balance.DEPOSIT_RANGE:
+	if inventory.is_empty() or not can_deposit_at(carrier_position):
 		return {}
 	var moved := inventory.amounts()
 	inventory.clear()
 	add_resources(moved)
 	return moved
+
+
+func can_deposit_at(carrier_position: Vector2) -> bool:
+	if carrier_position.distance_to(core.global_position) <= Balance.DEPOSIT_RANGE:
+		return true
+	for building: Building in buildings.values():
+		if building.info.get("depot", false) and building.global_position.distance_to(carrier_position) <= Balance.DEPOSIT_RANGE:
+			return true
+	return false
+
+
+## 짓는 데 필요한 제작대 단계·영토 조건. 지을 수 있으면 "" (건설 메뉴의 잠금 표시와 build()가 같이 쓴다)
+func tech_error(type_id: String) -> String:
+	var tier: int = BuildingDB.TYPES[type_id].get("tier", 0)
+	if tier > 0 and workbench_tier() < tier:
+		return "제작대 %d단계가 필요합니다" % tier
+	return ""
+
+
+## 모든 순간이동 탑 칸 (D-022). 서로 모두 연결되어 있다
+func teleports() -> Array[Vector2i]:
+	var cells: Array[Vector2i] = []
+	for cell: Vector2i in buildings:
+		if buildings[cell].info.get("teleport", false):
+			cells.append(cell)
+	return cells
+
+
+func has_type(type_id: String) -> bool:
+	return _find_type(type_id) != World.NO_CELL
+
+
+func find_teleport_near(actor_position: Vector2) -> Vector2i:
+	return _find_near(actor_position, func(building: Building) -> bool: return building.info.get("teleport", false))
 
 
 func _spend(cost: Dictionary, payer: Inventory) -> void:
@@ -74,8 +108,12 @@ func _spend(cost: Dictionary, payer: Inventory) -> void:
 ## 성공하면 "", 실패하면 이유를 돌려준다.
 ## perks: 짓는 사람의 건설 패시브(PassiveDB.build_perks). 비용 할인·건설 거리·건물 체력·자가 보수·가시·탑 속도 (D-020)
 func build(cell: Vector2i, type_id: String, builder_position: Vector2, payer: Inventory = null, perks := {}) -> String:
-	var cost := BuildingDB.discounted(BuildingDB.TYPES[type_id]["cost"], perks.get("discount", 0.0))
-	if not in_territory(cell):
+	var info: Dictionary = BuildingDB.TYPES[type_id]
+	var cost := BuildingDB.discounted(info["cost"], perks.get("discount", 0.0))
+	var tech := tech_error(type_id)
+	if tech != "":
+		return tech
+	if not in_territory(cell) and not info.get("outside", false):
 		return "왕국 영토(점선 원) 안에만 지을 수 있습니다"
 	if world.cell_center(cell).distance_to(builder_position) > Balance.BUILD_REACH + perks.get("reach", 0.0) * Balance.TILE:
 		return "너무 멉니다"
@@ -95,11 +133,14 @@ func build(cell: Vector2i, type_id: String, builder_position: Vector2, payer: In
 	buildings[cell] = building
 	Events.world_sound_requested.emit("build", building.global_position)
 	Events.map_cells_changed.emit([cell])
+	if info.has("reveal"):
+		world.reveal_area(cell, info["reveal"])
 	return ""
 
 
 ## 철거하면 건설 비용의 절반을 돌려받는다. 성공하면 "", 실패하면 이유를 돌려준다
-func demolish(cell: Vector2i) -> String:
+## refund_bonus: 해체 전문가 패시브 (0.25 = 환불 비율 +25%p)
+func demolish(cell: Vector2i, refund_bonus := 0.0) -> String:
 	var building: Building = buildings.get(cell)
 	if building == null:
 		return ""
@@ -110,7 +151,7 @@ func demolish(cell: Vector2i) -> String:
 		return "단계를 올린 제작대는 철거할 수 없습니다"
 	var cost: Dictionary = building.info["cost"]
 	for kind in cost:
-		stock[kind] += floori(cost[kind] * BuildingDB.REFUND_RATE)
+		stock[kind] += floori(cost[kind] * minf(1.0, BuildingDB.REFUND_RATE + refund_bonus))
 	buildings.erase(cell)
 	building.queue_free()
 	Events.world_sound_requested.emit("demolish", world.cell_center(cell))
@@ -241,17 +282,24 @@ func _check_storage(cell: Vector2i, actor_position: Vector2) -> String:
 	return ""
 
 
-## 성공하면 "", 실패하면 이유를 돌려준다. bonus: 보수 전문가 패시브 (0.5 = 수리량 +50%)
-func repair(repairer_position: Vector2, payer: Inventory = null, bonus := 0.0) -> String:
+## 성공하면 "", 실패하면 이유를 돌려준다.
+## perks: 수리하는 사람의 패시브(PassiveDB.repair_perks). 수리량(보수 전문가)·비용 할인(자재 절약)·영토 건물 회복(핵 공명)
+func repair(repairer_position: Vector2, payer: Inventory = null, perks := {}) -> String:
+	var cost := BuildingDB.discounted(Balance.REPAIR_COST, perks.get("discount", 0.0))
 	if repairer_position.distance_to(core.global_position) > Balance.REPAIR_RANGE:
 		return "왕국 핵 근처에서만 수리할 수 있습니다"
 	if core.hp >= core.max_hp:
 		return "왕국이 멀쩡합니다"
-	if not can_afford(Balance.REPAIR_COST, payer):
-		return "수리에는 %s 이(가) 필요합니다" % Balance.format_cost(Balance.REPAIR_COST)
-	_spend(Balance.REPAIR_COST, payer)
-	var amount := Balance.REPAIR_AMOUNT * (1.0 + bonus)
+	if not can_afford(cost, payer):
+		return "수리에는 %s 이(가) 필요합니다" % Balance.format_cost(cost)
+	_spend(cost, payer)
+	var amount: float = Balance.REPAIR_AMOUNT * (1.0 + perks.get("amount_bonus", 0.0))
 	core.repair(amount)
+	var resonance: float = perks.get("resonance", 0.0)
+	if resonance > 0.0:
+		for building: Building in buildings.values():
+			if in_territory(building.cell):
+				building.heal(building.max_hp * resonance)
 	Events.world_sound_requested.emit("repair", core.global_position)
 	Fx.float_text(get_tree(), core.global_position + Vector2(0, -40), "+%d" % amount, Color("6fcf6f"))
 	return ""

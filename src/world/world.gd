@@ -167,6 +167,19 @@ func reveal(at: Vector2) -> void:
 		cells_explored.emit(changed)
 
 
+## 감시탑(D-022): cell 주변 radius칸을 탐험하고, 내가 밝힌 칸처럼 다른 사람에게도 전한다(cells_explored)
+func reveal_area(cell: Vector2i, radius: int) -> void:
+	var around: Array[Vector2i] = []
+	for y in range(cell.y - radius, cell.y + radius + 1):
+		for x in range(cell.x - radius, cell.x + radius + 1):
+			var target := Vector2i(x, y)
+			if (target - cell).length_squared() <= radius * radius:
+				around.append(target)
+	var changed := mark_explored(around)
+	if not changed.is_empty():
+		cells_explored.emit(changed)
+
+
 ## 칸들을 탐험한 것으로 표시하고 새로 탐험된 칸만 돌려준다. 다른 사람이 밝힌 칸도 여기로 들어온다
 func mark_explored(cells: Array[Vector2i]) -> Array[Vector2i]:
 	var changed: Array[Vector2i] = []

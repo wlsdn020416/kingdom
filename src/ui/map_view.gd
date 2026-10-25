@@ -34,6 +34,11 @@ func _draw() -> void:
 	for enemy: Enemy in get_tree().get_nodes_in_group("enemies"):
 		if enemy.is_invader:
 			draw_rect(Rect2(_to_map(enemy.global_position, area) - Vector2.ONE, Vector2(3, 3)), Palette.ENEMY_MARK)
+	# 순간이동 탑(D-022)은 지도 한 칸이 작아도 찾을 수 있게 표시한다
+	for building: Building in map.kingdom.buildings.values():
+		if building.info.get("teleport", false):
+			var at := _to_map(building.global_position, area)
+			draw_colored_polygon(PackedVector2Array([at + Vector2(0, -5), at + Vector2(4, 0), at + Vector2(0, 5), at + Vector2(-4, 0)]), building.info["color"])
 	for cell in map.pings:
 		draw_arc(_to_map(map.world.cell_center(cell), area), 5.0, 0.0, TAU, 16, Palette.PING, 2.0)
 	var player := get_tree().get_first_node_in_group("player") as Player

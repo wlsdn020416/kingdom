@@ -59,7 +59,8 @@ func _hovered_cell() -> Vector2i:
 ## 설치 미리보기 (초록: 가능, 빨강: 불가)
 func _draw() -> void:
 	var cell := _hovered_cell()
-	var can_place := _kingdom.in_territory(cell) and _world.data.is_walkable(cell) and not _kingdom.is_occupied(cell)
+	var inside: bool = _kingdom.in_territory(cell) or BuildingDB.TYPES[selected_type()].get("outside", false)
+	var can_place: bool = inside and _world.data.is_walkable(cell) and not _kingdom.is_occupied(cell) and _kingdom.tech_error(selected_type()) == ""
 	var center := to_local(_world.cell_center(cell))
 	var rect := Rect2(center - Vector2.ONE * Balance.TILE / 2.0, Vector2.ONE * Balance.TILE)
 	var color := Color("6fcf6f") if can_place else Color("ff5040")
