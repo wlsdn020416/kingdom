@@ -1,7 +1,7 @@
 class_name LobbyPanel
 extends VBoxContainer
-## 시작 화면의 멀티플레이 칸. Steam 방 만들기·친구 초대, 개발용 IP 접속, 참가자 명단을 보여준다.
-## 접속은 NetSession 메서드만 호출한다. 게임 시작은 시작 화면의 "시작" 버튼이 맡는다(호스트일 때 모두 함께 시작).
+## 시작 화면 멀티플레이 팝업의 방 칸. Steam 방 만들기·친구 초대, 개발용 IP 접속, 참가자 명단을 보여준다.
+## 접속은 NetSession 메서드만 호출한다. 게임 시작은 팝업의 "시작" 버튼이 맡는다(호스트일 때 모두 함께 시작).
 
 var _net: NetSession
 var _status: Label
