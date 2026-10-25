@@ -1,0 +1,73 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scenes/main.gd" id="1_main"]
+[ext_resource type="Script" path="res://src/world/world.gd" id="2_world"]
+[ext_resource type="Script" path="res://src/kingdom/kingdom.gd" id="3_kingdom"]
+[ext_resource type="Script" path="res://src/kingdom/core.gd" id="4_core"]
+[ext_resource type="Script" path="res://src/characters/player.gd" id="5_player"]
+[ext_resource type="Script" path="res://src/gameplay/ping_markers.gd" id="6_pings"]
+[ext_resource type="Script" path="res://src/kingdom/build_mode.gd" id="7_build"]
+[ext_resource type="Script" path="res://src/gameplay/day_night.gd" id="8_daynight"]
+[ext_resource type="Script" path="res://src/gameplay/wave_spawner.gd" id="9_spawner"]
+[ext_resource type="Script" path="res://src/ui/hud.gd" id="10_hud"]
+
+[sub_resource type="RectangleShape2D" id="core_shape"]
+size = Vector2(96, 96)
+
+[sub_resource type="CircleShape2D" id="player_shape"]
+radius = 10.0
+
+[node name="Main" type="Node2D"]
+script = ExtResource("1_main")
+
+[node name="Darkness" type="CanvasModulate" parent="."]
+
+[node name="World" type="Node2D" parent="." groups=["world"]]
+script = ExtResource("2_world")
+
+[node name="Terrain" type="TileMapLayer" parent="World"]
+
+[node name="Objects" type="TileMapLayer" parent="World"]
+
+[node name="Kingdom" type="Node2D" parent="."]
+script = ExtResource("3_kingdom")
+
+[node name="Core" type="StaticBody2D" parent="Kingdom" groups=["core"]]
+collision_layer = 4
+collision_mask = 0
+script = ExtResource("4_core")
+
+[node name="Shape" type="CollisionShape2D" parent="Kingdom/Core"]
+shape = SubResource("core_shape")
+
+[node name="Enemies" type="Node2D" parent="."]
+
+[node name="Player" type="CharacterBody2D" parent="." groups=["player"]]
+collision_layer = 8
+collision_mask = 7
+motion_mode = 1
+script = ExtResource("5_player")
+
+[node name="Shape" type="CollisionShape2D" parent="Player"]
+shape = SubResource("player_shape")
+
+[node name="Camera" type="Camera2D" parent="Player"]
+
+[node name="Projectiles" type="Node2D" parent="." groups=["projectiles"]]
+
+[node name="Effects" type="Node2D" parent="." groups=["fx_layer"]]
+
+[node name="PingMarkers" type="Node2D" parent="."]
+script = ExtResource("6_pings")
+
+[node name="BuildMode" type="Node2D" parent="."]
+script = ExtResource("7_build")
+
+[node name="DayNight" type="Node" parent="."]
+script = ExtResource("8_daynight")
+
+[node name="WaveSpawner" type="Node" parent="."]
+script = ExtResource("9_spawner")
+
+[node name="Hud" type="CanvasLayer" parent="."]
+script = ExtResource("10_hud")
