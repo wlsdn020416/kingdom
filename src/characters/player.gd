@@ -40,6 +40,9 @@ var _dash_time := 0.0
 var _dash_velocity := Vector2.ZERO
 var _dash_cooldown := 0.0
 var _combo_count := 0  # 마무리 일격 패시브: 지난 2배 피해 뒤 기본 공격 횟수
+var _whirl_count := 0  # 회오리 베기 패시브: 지난 회전 베기 뒤 휘두른 횟수
+## 왕국 영토 안에 있는지 (성벽의 가호 패시브). Player는 Kingdom을 모르므로 Main이 매 프레임 알려 준다
+var in_territory := false
 var _since_hit := 0.0  # 재생 패시브: 마지막으로 맞은 뒤 지난 시간
 var _last_stand_cooldown := 0.0
 var _respawn_time := 0.0
@@ -47,6 +50,7 @@ var _shake := 0.0
 var _sprite := Sprite2D.new()
 var _walk_time := 0.0
 var weapon_visual := WeaponVisual.new()
+var equipment_visual := EquipmentVisual.new()
 
 
 func _ready() -> void:
@@ -58,6 +62,10 @@ func _ready() -> void:
 	add_child(weapon_visual)
 	weapon_visual.setup(_sprite)
 	add_child(_sprite)
+	_sprite.add_child(equipment_visual)
+	equipment_visual.setup(_sprite)
+	equipment_visual.set_items(equipment.equipped)
+	equipment.changed.connect(func() -> void: equipment_visual.set_items(equipment.equipped))
 	equipment.changed.connect(func() -> void: hp = minf(hp, max_hp()))
 	progression.changed.connect(func() -> void: inventory.bonus_slots = int(progression.value("deep_pockets")))
 	Fx.add_light(self, LIGHT_RADIUS)
@@ -130,8 +138,10 @@ func use_skill(slot: int) -> void:
 	var skill: Dictionary = ItemDB.ITEMS[bar[slot]]["skill"].duplicate()
 	if skill.has("damage"):
 		skill["damage"] *= 1.0 + progression.value("skill_power") / 100.0
+	if skill.has("amount"):
+		skill["amount"] *= 1.0 + progression.value("field_medic") / 100.0
 	Skills.cast(skill, self)
-	equipment.start_cooldown(bar[slot])
+	equipment.start_cooldown(bar[slot], 1.0 - progression.value("tactician") / 100.0)
 	var id: String = ItemDB.ITEMS[bar[slot]]["skill"]["id"]
 	if id in ["shotgun", "fireball", "bomb"]:
 		_show_attack(bar[slot])
@@ -169,13 +179,30 @@ func dash() -> void:
 	var direction := _move_input()
 	if direction == Vector2.ZERO:
 		direction = aim_direction
-	_dash_velocity = direction.normalized() * DASH_SPEED
+	_dash_velocity = direction.normalized() * DASH_SPEED * (1.0 + progression.value("sprint_dash") / 100.0)
 	_dash_time = DASH_TIME
+	var afterimage := progression.value("evasive_dash")
+	if afterimage > 0.0:
+		_invuln_time = maxf(_invuln_time, DASH_TIME + afterimage)
 	sound_requested.emit("dash", global_position)
 
 
 func dash_cooldown_left() -> float:
 	return maxf(0.0, _dash_cooldown)
+
+
+## 모닥불처럼 조금씩 차오르는 회복 (떠오르는 글자 없음)
+func restore(amount: float) -> void:
+	if not is_dead:
+		hp = minf(max_hp(), hp + amount)
+
+
+## 순간이동 탑(D-022). 이동은 각자 정하므로 내 캐릭터를 바로 옮긴다 (D-017)
+func teleport_to(at: Vector2) -> void:
+	global_position = at
+	velocity = Vector2.ZERO
+	_dash_time = 0.0
+	Fx.burst(get_tree(), at, Color("a070ff"), 18, 160.0)
 
 
 func heal(amount: float) -> void:
@@ -191,6 +218,8 @@ func take_damage(amount: float) -> void:
 	if is_dead or _invuln_time > 0.0 or _shield_time > 0.0 or _dash_time > 0.0:
 		return
 	_since_hit = 0.0
+	var reduction := progression.value("iron_skin") + (progression.value("bulwark_aura") if in_territory else 0.0)
+	amount *= maxf(0.1, 1.0 - reduction / 100.0)
 	var last_stand := progression.value("last_stand")
 	if hp - amount <= 0.0 and last_stand > 0.0 and _last_stand_cooldown <= 0.0:
 		# 최후의 저항: 쓰러질 피해를 한 번 버틴다
@@ -237,7 +266,12 @@ func _respawn() -> void:
 
 ## 다른 사람 화면에 보낼 겉모습 (멀티플레이 동기화용)
 func appearance() -> Dictionary:
-	return {"frame": _sprite.frame, "flip": _sprite.flip_h, "shown": _sprite.visible and not is_dead, "weapon": equipment.item_in("weapon")}
+	return {"frame": _sprite.frame, "flip": _sprite.flip_h, "shown": _sprite.visible and not is_dead, "weapon": equipment.item_in("weapon"), "gear": equipment.equipped.duplicate()}
+
+
+## 폭발·보스 같은 화면 흔들림 (D-023). 더 센 흔들림이 이긴다
+func add_shake(strength: float) -> void:
+	_shake = maxf(_shake, strength)
 
 
 func respawn_time_left() -> float:
@@ -255,8 +289,15 @@ func _fire_weapon() -> void:
 		Melee.swing(get_tree(), global_position, aim_direction, weapon)
 		attacked.emit("swing", {"origin": global_position, "direction": aim_direction, "weapon": weapon})
 		return
-	fire({"direction": aim_direction.rotated(randf_range(-0.03, 0.03)), "damage": weapon["damage"], "speed": weapon["speed"],
-		"pierce": weapon.get("pierce", false), "splash_radius": weapon.get("splash_radius", 0.0), "execute_bonus": weapon["execute_bonus"]})
+	var shots: int = weapon.get("shots", 1)
+	var spread: float = deg_to_rad(weapon.get("spread", 0.0))
+	var aim := aim_direction.rotated(randf_range(-0.03, 0.03))
+	for i in shots:
+		var turn := 0.0 if shots == 1 else (float(i) / (shots - 1) - 0.5) * spread * (shots - 1)
+		fire({"direction": aim.rotated(turn), "damage": weapon["damage"], "speed": weapon["speed"],
+			"lifetime": weapon.get("lifetime", 0.9), "pierce": weapon.get("pierce", false),
+			"splash_radius": weapon.get("splash_radius", 0.0), "execute_bonus": weapon["execute_bonus"],
+			"opener_bonus": weapon["opener_bonus"], "harvest_power": weapon["harvest_power"], "emphasis": weapon.get("emphasis", false)})
 
 
 ## 장착한 무기에 전투 패시브를 더한 기본 공격 값 (D-020). 부를 때마다 마무리 일격 횟수를 센다
@@ -265,23 +306,43 @@ func _boosted_weapon() -> Dictionary:
 	var family: String = weapon.get("family", "")
 	var mastery: String = PassiveDB.FAMILY_MASTERY.get(family, "")
 	var bonus := progression.value("keen_edge") + (progression.value(mastery) if mastery != "" else 0.0)
+	if hp <= max_hp() * PassiveDB.BERSERK_HP_RATIO:
+		bonus += progression.value("berserker")
 	weapon["damage"] *= 1.0 + bonus / 100.0
 	match family:
 		"sword":
 			weapon["arc"] += progression.value("sword_sweep")
+			weapon["range"] *= 1.0 + progression.value("blade_reach") / 100.0
+			var whirl := int(progression.value("whirlwind"))
+			if whirl > 0:
+				_whirl_count += 1
+				if _whirl_count >= whirl:
+					_whirl_count = 0
+					weapon["arc"] = 360.0
+					weapon["emphasis"] = true
 		"bow":
 			weapon["pierce"] = progression.value("piercing_arrows") > 0.0
+			weapon["shots"] = maxi(1, int(progression.value("multishot")))
+			weapon["spread"] = PassiveDB.MULTISHOT_SPREAD
 		"crossbow":
 			weapon["rate"] *= 1.0 + progression.value("rapid_reload") / 100.0
+			weapon["shots"] = maxi(1, int(progression.value("twin_bolts")))
+			weapon["spread"] = PassiveDB.TWIN_SPREAD
 		"staff":
 			weapon["splash_radius"] = progression.value("ember_burst")
+			var charge := 1.0 + progression.value("overcharge") / 100.0
+			weapon["speed"] *= charge
+			weapon["lifetime"] = 0.9 * charge
 	var finisher := int(progression.value("combo_finisher"))
 	if finisher > 0:
 		_combo_count += 1
 		if _combo_count >= finisher:
 			_combo_count = 0
 			weapon["damage"] *= PassiveDB.COMBO_MULTIPLIER
+			weapon["emphasis"] = true
 	weapon["execute_bonus"] = progression.value("executioner") / 100.0
+	weapon["opener_bonus"] = progression.value("first_strike") / 100.0
+	weapon["harvest_power"] = progression.value("prospector") / 100.0
 	return weapon
 
 

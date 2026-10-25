@@ -58,6 +58,11 @@ func build_perks() -> Dictionary:
 	return PassiveDB.build_perks(ranks)
 
 
+## 핵을 수리할 때 쓰는 내 패시브 효과 (Kingdom.repair의 perks)
+func repair_perks() -> Dictionary:
+	return PassiveDB.repair_perks(ranks)
+
+
 func lose_unspent() -> void:
 	xp = 0
 	changed.emit()

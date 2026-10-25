@@ -111,8 +111,9 @@ func is_ready(id: String) -> bool:
 	return cooldown_left(id) <= 0.0
 
 
-func start_cooldown(id: String) -> void:
-	_cooldowns[id] = ItemDB.ITEMS[id]["skill"]["cooldown"]
+## scale: 전술가 패시브처럼 쿨타임을 줄이는 배수 (0.9 = 10% 짧게)
+func start_cooldown(id: String, scale := 1.0) -> void:
+	_cooldowns[id] = ItemDB.ITEMS[id]["skill"]["cooldown"] * scale
 
 
 func _worn_items() -> Array[String]:

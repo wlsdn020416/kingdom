@@ -24,6 +24,11 @@ var explode_radius := 0.0
 var harvest_radius := 0.0  # 광역 채집 패시브 (플레이어 탄만)
 var splash_radius := 0.0  # 불씨 폭발 패시브: 적을 맞히면 이 안의 다른 적에게도 일부 피해 (D-020)
 var execute_bonus := 0.0  # 처형자 패시브: 체력이 낮은 적에게 추가 피해 비율
+var opener_bonus := 0.0  # 선제공격 패시브: 체력이 가득 찬 적에게 추가 피해 비율
+var harvest_power := 0.0  # 숙련 채집꾼 패시브: 나무·바위·광석에 주는 피해 비율
+var emphasis := false  # 마무리 일격처럼 강해진 기본 공격 (피해 숫자 강조, D-023)
+var slow_factor := 1.0  # 서리탑: 맞은 적의 이동 속도 배수와 지속 시간 (D-022)
+var slow_time := 0.0
 var source := Enemy.SOURCE_LOCAL  # 쏜 플레이어의 peer id (처치 보상용)
 ## false면 나무·바위·건물·핵에 막히기만 하고 피해를 주지 않는다. 멀티플레이 참가자 화면의 탄 (월드·왕국은 호스트만 바꾼다, D-017)
 var hits_world := true
@@ -50,6 +55,11 @@ static func spawn(tree: SceneTree, at: Vector2, params: Dictionary) -> Projectil
 	projectile.harvest_radius = params.get("harvest_radius", 0.0)
 	projectile.splash_radius = params.get("splash_radius", 0.0)
 	projectile.execute_bonus = params.get("execute_bonus", 0.0)
+	projectile.opener_bonus = params.get("opener_bonus", 0.0)
+	projectile.harvest_power = params.get("harvest_power", 0.0)
+	projectile.emphasis = params.get("emphasis", false)
+	projectile.slow_factor = params.get("slow_factor", 1.0)
+	projectile.slow_time = params.get("slow_time", 0.0)
 	projectile.source = Enemy.SOURCE_TOWER if projectile.team == Team.TOWER else params.get("source", Enemy.SOURCE_LOCAL)
 	projectile.hits_world = params.get("hits_world", true)
 	projectile.visual_only = params.get("visual_only", false)
@@ -122,9 +132,9 @@ func _on_hit(body: Object) -> void:
 		if not hits_world:
 			pass
 		elif cell != World.NO_CELL and harvest_radius > 0.0:
-			world.damage_objects_around(cell, damage, harvest_radius, source)
+			world.damage_objects_around(cell, damage * (1.0 + harvest_power), harvest_radius, source)
 		elif cell != World.NO_CELL:
-			world.damage_object(cell, damage, source if team == Team.PLAYER else World.NOBODY)
+			world.damage_object(cell, damage * (1.0 + harvest_power), source if team == Team.PLAYER else World.NOBODY)
 		_show_impact()
 		queue_free()
 		return
@@ -137,7 +147,10 @@ func _on_hit(body: Object) -> void:
 		var enemy := body as Enemy
 		if splash_radius > 0.0:
 			_splash(enemy)
-		enemy.take_damage(enemy.damage_after_execute(damage, execute_bonus), source)
+		if slow_time > 0.0:
+			enemy.slow(slow_factor, slow_time)
+		var dealt := enemy.damage_after_execute(damage, execute_bonus, opener_bonus)
+		enemy.take_damage(dealt, source, emphasis or dealt > damage)
 	elif hits_world or body is Player:
 		# 참가자 화면에 따라 그린 적 탄은 내 캐릭터만 맞힌다. 건물·왕국 핵 피해는 호스트의 탄이 정한다 (D-017)
 		if body.has_method("take_damage"):
@@ -153,6 +166,8 @@ func _splash(hit: Enemy) -> void:
 		if enemy != hit and enemy.global_position.distance_to(hit.global_position) <= splash_radius + enemy.radius:
 			enemy.take_damage(damage * PassiveDB.EMBER_SPLASH_RATIO, source)
 	Fx.burst(get_tree(), hit.global_position, color, 8, splash_radius * 2.0)
+	if team == Team.TOWER:
+		Events.screen_shake_requested.emit(hit.global_position, 2.5)
 
 
 func _explode() -> void:
@@ -160,6 +175,7 @@ func _explode() -> void:
 	if hits_world and not visual_only:
 		Events.world_sound_requested.emit("explosion", global_position)
 		Events.combat_effect_requested.emit("explosion", global_position, explode_radius / WeaponArtDB.EXPLOSION_RADIUS, 0.0)
+		Events.screen_shake_requested.emit(global_position, 7.0)
 	for enemy: Enemy in get_tree().get_nodes_in_group("enemies"):
 		if enemy.global_position.distance_to(global_position) < explode_radius + enemy.radius:
 			if not visual_only:

@@ -11,7 +11,7 @@ const BRANCH_NAMES := {"combat": "전투", "survival": "생존", "building": "�
 const LANES := {
 	"combat": ["무기 숙련", "화력"],
 	"survival": ["신체", "채집"],
-	"building": ["운영", "방벽"],
+	"building": ["운영", "방벽", "화살탑"],
 }
 
 ## 무기 종류(ItemDB weapon.family) -> 그 무기의 숙련 노드
@@ -25,6 +25,9 @@ const EXECUTE_HP_RATIO := 0.3  # 처형자가 적용되는 적 체력 비율
 const EMBER_SPLASH_RATIO := 0.5  # 불씨 폭발이 주변 적에게 주는 피해 비율
 const REGEN_DELAY := 3.0  # 재생이 시작되기까지 맞지 않아야 하는 시간(초)
 const LAST_STAND_INVULN := 2.0  # 최후의 저항으로 버틴 뒤 무적 시간(초)
+const MULTISHOT_SPREAD := 10.0  # 다중 사격 화살 사이 각도(도)
+const TWIN_SPREAD := 4.0  # 쌍발 석궁·쌍궁 탑 탄 사이 각도(도)
+const BERSERK_HP_RATIO := 0.5  # 광전사가 켜지는 내 체력 비율
 
 const PASSIVES := {
 	# --- 전투: 무기 숙련 (무기 종류별로 숙련 → 특화) ---
@@ -89,6 +92,46 @@ const PASSIVES := {
 		"name": "처형자", "desc": "체력 30%% 이하인 적에게 기본 공격 피해 +%s%%",
 		"costs": [20, 36], "values": [25, 50],
 	},
+	"blade_reach": {
+		"branch": "combat", "lane": 0, "pos": Vector2i(0, 2), "requires": ["sword_mastery"],
+		"name": "긴 칼날", "desc": "검 공격 사거리 +%s%%",
+		"costs": [12, 24], "values": [15, 30],
+	},
+	"whirlwind": {
+		"branch": "combat", "lane": 0, "pos": Vector2i(0, 3), "requires": ["sword_sweep"],
+		"name": "회오리 베기", "desc": "검을 %s번 휘두를 때마다 한 번은 주위를 한 바퀴 벤다",
+		"costs": [22, 38], "values": [4, 3],
+	},
+	"multishot": {
+		"branch": "combat", "lane": 0, "pos": Vector2i(1, 2), "requires": ["bow_mastery"],
+		"name": "다중 사격", "desc": "활 기본 공격이 %s갈래로 나간다",
+		"costs": [18, 34], "values": [3, 5],
+	},
+	"twin_bolts": {
+		"branch": "combat", "lane": 0, "pos": Vector2i(2, 2), "requires": ["rapid_reload"],
+		"name": "쌍발", "desc": "석궁 기본 공격이 %s발씩 나간다",
+		"costs": [24], "values": [2],
+	},
+	"overcharge": {
+		"branch": "combat", "lane": 0, "pos": Vector2i(3, 2), "requires": ["staff_mastery"],
+		"name": "마력 과부하", "desc": "지팡이 투사체 속도·사거리 +%s%%",
+		"costs": [12, 24], "values": [25, 50],
+	},
+	"first_strike": {
+		"branch": "combat", "lane": 1, "pos": Vector2i(6, 1), "requires": ["keen_edge"],
+		"name": "선제공격", "desc": "체력이 가득 찬 적에게 기본 공격 피해 +%s%%",
+		"costs": [12, 24], "values": [50, 100],
+	},
+	"berserker": {
+		"branch": "combat", "lane": 1, "pos": Vector2i(6, 2), "requires": ["first_strike"],
+		"name": "광전사", "desc": "내 체력이 절반 이하일 때 기본 공격 피해 +%s%%",
+		"costs": [18, 32], "values": [20, 40],
+	},
+	"tactician": {
+		"branch": "combat", "lane": 1, "pos": Vector2i(5, 2), "requires": ["skill_power"],
+		"name": "전술가", "desc": "장비 스킬 쿨타임 -%s%%",
+		"costs": [16, 30], "values": [10, 20],
+	},
 	# --- 생존: 신체 ---
 	"vitality": {
 		"branch": "survival", "lane": 0, "pos": Vector2i(0, 0), "requires": [],
@@ -120,6 +163,31 @@ const PASSIVES := {
 		"name": "질풍", "desc": "대시 쿨타임 -%s%%",
 		"costs": [12, 24], "values": [20, 40],
 	},
+	"iron_skin": {
+		"branch": "survival", "lane": 0, "pos": Vector2i(1, 0), "requires": [],
+		"name": "철갑 피부", "desc": "받는 피해 -%s%%",
+		"costs": [10, 20, 34], "values": [8, 15, 22],
+	},
+	"dawn_blessing": {
+		"branch": "survival", "lane": 0, "pos": Vector2i(1, 2), "requires": ["quick_return"],
+		"name": "새벽의 축복", "desc": "아침이 오면 체력을 %s%% 회복",
+		"costs": [12, 24], "values": [50, 100],
+	},
+	"field_medic": {
+		"branch": "survival", "lane": 0, "pos": Vector2i(0, 3), "requires": ["regeneration"],
+		"name": "응급 처치", "desc": "치유 스킬 회복량 +%s%%",
+		"costs": [10, 20], "values": [30, 60],
+	},
+	"sprint_dash": {
+		"branch": "survival", "lane": 0, "pos": Vector2i(2, 2), "requires": ["windstep"],
+		"name": "질주", "desc": "대시 거리 +%s%%",
+		"costs": [12, 24], "values": [25, 50],
+	},
+	"evasive_dash": {
+		"branch": "survival", "lane": 0, "pos": Vector2i(2, 3), "requires": ["sprint_dash"],
+		"name": "잔상", "desc": "대시가 끝난 뒤 %s초 더 무적",
+		"costs": [16, 30], "values": [0.3, 0.6],
+	},
 	# --- 생존: 채집 ---
 	"bountiful": {
 		"branch": "survival", "lane": 1, "pos": Vector2i(3, 0), "requires": [],
@@ -145,6 +213,21 @@ const PASSIVES := {
 		"branch": "survival", "lane": 1, "pos": Vector2i(5, 1), "requires": ["scavenger"],
 		"name": "보물 사냥꾼", "desc": "상자에서 장비가 나올 확률 +%s%%p",
 		"costs": [14, 28], "values": [10, 20],
+	},
+	"herbalist": {
+		"branch": "survival", "lane": 1, "pos": Vector2i(4, 1), "requires": ["bountiful"],
+		"name": "약초꾼", "desc": "채집할 때마다 체력 %s 회복",
+		"costs": [10, 20], "values": [3, 6],
+	},
+	"prospector": {
+		"branch": "survival", "lane": 1, "pos": Vector2i(3, 2), "requires": ["wide_harvest"],
+		"name": "숙련 채집꾼", "desc": "나무·바위·광석에 주는 피해 +%s%%",
+		"costs": [10, 22], "values": [50, 100],
+	},
+	"harvest_scholar": {
+		"branch": "survival", "lane": 1, "pos": Vector2i(4, 2), "requires": ["herbalist"],
+		"name": "채집 학자", "desc": "채집 경험치 +%s%%",
+		"costs": [14, 28], "values": [50, 100],
 	},
 	# --- 건설: 운영 (효과는 내가 짓거나 고칠 때 적용) ---
 	"frugal_builder": {
@@ -187,6 +270,46 @@ const PASSIVES := {
 		"branch": "building", "lane": 1, "pos": Vector2i(3, 2), "requires": ["mending_walls", "repair_expert"],
 		"name": "긴급 요새화", "desc": "밤이 시작될 때 왕국의 건물과 핵 체력을 %s%% 회복 (한 명만 배워도 적용)",
 		"costs": [30, 50], "values": [30, 60],
+	},
+	"salvage_expert": {
+		"branch": "building", "lane": 0, "pos": Vector2i(0, 2), "requires": ["long_reach"],
+		"name": "해체 전문가", "desc": "철거할 때 돌려받는 자원 +%s%%p",
+		"costs": [8, 16], "values": [25, 50],
+	},
+	"builders_insight": {
+		"branch": "building", "lane": 0, "pos": Vector2i(0, 3), "requires": ["salvage_expert"],
+		"name": "건축가의 깨달음", "desc": "건물을 지을 때마다 경험치 +%s",
+		"costs": [14, 28], "values": [2, 4],
+	},
+	"thrifty_repair": {
+		"branch": "building", "lane": 0, "pos": Vector2i(2, 2), "requires": ["repair_expert"],
+		"name": "자재 절약", "desc": "핵 수리 비용 -%s%%",
+		"costs": [10, 22], "values": [25, 50],
+	},
+	"core_resonance": {
+		"branch": "building", "lane": 0, "pos": Vector2i(2, 3), "requires": ["thrifty_repair"],
+		"name": "핵 공명", "desc": "핵을 수리하면 영토 안 건물도 최대 체력의 %s%% 회복",
+		"costs": [18, 34], "values": [20, 40],
+	},
+	"bulwark_aura": {
+		"branch": "building", "lane": 1, "pos": Vector2i(4, 2), "requires": ["sturdy_build"],
+		"name": "성벽의 가호", "desc": "왕국 영토 안에서 받는 피해 -%s%%",
+		"costs": [12, 24], "values": [15, 30],
+	},
+	"hawk_eye": {
+		"branch": "building", "lane": 2, "pos": Vector2i(5, 2), "requires": ["tower_drill"],
+		"name": "매의 눈", "desc": "내가 지은 화살탑 사거리 +%s%%",
+		"costs": [12, 24], "values": [20, 40],
+	},
+	"sharp_bolts": {
+		"branch": "building", "lane": 2, "pos": Vector2i(6, 2), "requires": ["tower_drill"],
+		"name": "강화 화살촉", "desc": "내가 지은 화살탑 피해 +%s%%",
+		"costs": [12, 24], "values": [25, 50],
+	},
+	"twin_bows": {
+		"branch": "building", "lane": 2, "pos": Vector2i(5, 3), "requires": ["hawk_eye", "sharp_bolts"],
+		"name": "쌍궁 탑", "desc": "내가 지은 화살탑이 %s발씩 쏜다",
+		"costs": [26, 44], "values": [2, 3],
 	},
 }
 
@@ -245,4 +368,16 @@ static func build_perks(ranks: Dictionary) -> Dictionary:
 		"regen": value_in(ranks, "mending_walls"),
 		"thorns": value_in(ranks, "thorn_walls") / 100.0,
 		"tower_rate": 1.0 + value_in(ranks, "tower_drill") / 100.0,
+		"tower_range": 1.0 + value_in(ranks, "hawk_eye") / 100.0,
+		"tower_damage": 1.0 + value_in(ranks, "sharp_bolts") / 100.0,
+		"tower_shots": maxi(1, int(value_in(ranks, "twin_bows"))),
+	}
+
+
+## 핵을 수리할 때 수리하는 사람의 패시브로 정해지는 효과. Kingdom.repair()의 perks로 넘긴다
+static func repair_perks(ranks: Dictionary) -> Dictionary:
+	return {
+		"amount_bonus": value_in(ranks, "repair_expert") / 100.0,
+		"discount": value_in(ranks, "thrifty_repair") / 100.0,
+		"resonance": value_in(ranks, "core_resonance") / 100.0,
 	}
