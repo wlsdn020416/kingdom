@@ -40,6 +40,9 @@ func _refresh() -> void:
 		if not _kingdom.can_afford(cost, _player.inventory):
 			text += "   (자원 부족)"
 		var button := UiKit.button(text, choose.bind(type_id))
+		button.icon = Building.icon_texture(type_id)
+		button.custom_minimum_size.y = 64
+		button.add_theme_constant_override("h_separation", 10)
 		if not _kingdom.can_afford(cost, _player.inventory):
 			button.add_theme_color_override("font_color", UiKit.DANGER)
 		_list.add_child(button)

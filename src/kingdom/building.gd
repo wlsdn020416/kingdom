@@ -6,6 +6,9 @@ extends StaticBody2D
 signal destroyed(building: Building)
 
 const TOWER_LIGHT_RADIUS := 120.0
+const SPRITE_TEXTURE := preload("res://assets/kingdom/buildings.png")
+const SPRITE_SIZE := Vector2(32, 64)
+const SPRITE_OFFSET := Vector2(-16, -48)
 
 var type_id := ""
 var info := {}
@@ -88,34 +91,34 @@ func _nearest_enemy(max_range: float) -> Enemy:
 	return best
 
 
-## 임시 그림. Phase 2에서 스프라이트로 교체.
+## 설치물·설치 미리보기·메뉴에서 같은 원본 칸을 사용한다.
+static func sprite_region(id: String, at_tier: int = 0) -> Rect2:
+	var info: Dictionary = BuildingDB.TYPES[id]
+	var column: int = info["sprite_column"]
+	if info.get("workbench", false):
+		column += clampi(at_tier, 0, RecipeDB.max_tier())
+	return Rect2(Vector2(column * SPRITE_SIZE.x, 0), SPRITE_SIZE)
+
+
+static func draw_art(canvas: CanvasItem, at: Vector2, id: String, at_tier: int = 0, tint: Color = Color.WHITE) -> void:
+	canvas.draw_texture_rect_region(SPRITE_TEXTURE, Rect2(at + SPRITE_OFFSET, SPRITE_SIZE), sprite_region(id, at_tier), tint)
+
+
+static func icon_texture(id: String) -> AtlasTexture:
+	var texture := AtlasTexture.new()
+	texture.atlas = SPRITE_TEXTURE
+	var region := sprite_region(id)
+	var top: float = BuildingDB.TYPES[id]["sprite_top"]
+	region.position.y += top
+	region.size.y -= top
+	texture.region = region
+	return texture
+
+
 func _draw() -> void:
-	var half := Balance.TILE / 2.0
-	var color: Color = info["color"]
-	match type_id:
-		"wood_wall":
-			draw_rect(Rect2(-half + 1, -half + 1, 30, 30), color)
-			draw_rect(Rect2(-half + 1, -6, 30, 3), color.darkened(0.25))
-			draw_rect(Rect2(-half + 1, 5, 30, 3), color.darkened(0.25))
-		"stone_wall":
-			draw_rect(Rect2(-half + 1, -half + 1, 30, 30), color)
-			draw_rect(Rect2(-half + 1, -1, 30, 2), color.darkened(0.2))
-			draw_rect(Rect2(-1, -half + 1, 2, 15), color.darkened(0.2))
-		"gear_chest":
-			draw_rect(Rect2(-12, -9, 24, 19), color)
-			draw_rect(Rect2(-12, -9, 24, 6), color.lightened(0.15))
-			draw_rect(Rect2(-12, -3, 24, 2), color.darkened(0.35))
-			draw_rect(Rect2(-3, -4, 6, 5), Color("c9c2b0"))
-		"workbench":
-			draw_rect(Rect2(-13, -8, 26, 7), color.lightened(0.2))
-			draw_rect(Rect2(-12, -1, 4, 12), color.darkened(0.3))
-			draw_rect(Rect2(8, -1, 4, 12), color.darkened(0.3))
-			draw_rect(Rect2(-6, -12, 9, 4), Color("9a9ca0"))
-			for i in tier:
-				draw_rect(Rect2(-8 + i * 6, 3, 4, 4), Color("e3b341"))
-		_:
-			draw_rect(Rect2(-half + 3, -half + 3, 26, 26), color)
-			draw_rect(Rect2(-5, -5, 10, 10), Color("5b8fd6"))
+	draw_art(self, Vector2.ZERO, type_id, tier)
 	var max_hp: float = info["hp"]
 	if hp < max_hp:
-		HealthBarArt.draw_bar(self, Vector2(-HealthBarArt.WIDTH / 2.0, -half - 12), hp / max_hp, HealthBarArt.Tone.GREEN)
+		var top: float = info["sprite_top"]
+		var bar_y := SPRITE_OFFSET.y + top - HealthBarArt.HEIGHT - 2.0
+		HealthBarArt.draw_bar(self, Vector2(-HealthBarArt.WIDTH / 2.0, bar_y), hp / max_hp, HealthBarArt.Tone.GREEN)

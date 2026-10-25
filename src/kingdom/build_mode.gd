@@ -60,7 +60,9 @@ func _hovered_cell() -> Vector2i:
 func _draw() -> void:
 	var cell := _hovered_cell()
 	var can_place := _kingdom.in_territory(cell) and _world.data.is_walkable(cell) and not _kingdom.is_occupied(cell)
-	var rect := Rect2(_world.cell_center(cell) - Vector2.ONE * Balance.TILE / 2.0, Vector2.ONE * Balance.TILE)
-	var color: Color = BuildingDB.TYPES[selected_type()]["color"]
-	draw_rect(rect, Color(color, 0.5))
+	var center := to_local(_world.cell_center(cell))
+	var rect := Rect2(center - Vector2.ONE * Balance.TILE / 2.0, Vector2.ONE * Balance.TILE)
+	var color := Color("6fcf6f") if can_place else Color("ff5040")
+	draw_rect(rect, Color(color, 0.15))
+	Building.draw_art(self, center, selected_type(), 0, Color(1.0, 1.0, 1.0, 0.65))
 	draw_rect(rect.grow(-1.0), Color("6fcf6f") if can_place else Color("ff5040"), false, 2.0)
