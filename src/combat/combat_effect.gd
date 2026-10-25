@@ -4,10 +4,12 @@ extends Node2D
 
 const TEXTURE := preload("res://assets/combat/attack_effects.png")
 const MAX_DISPLAY_SCALE := 8.0
+const PENDING_META := &"pending_passive_effects"
 
 var effect_id := "impact"
 var display_scale := 1.0
 var _elapsed := 0.0
+var _reserved_slot := false
 
 
 static func spawn(tree: SceneTree, id: String, at: Vector2, size := 1.0, angle := 0.0) -> CombatEffect:
@@ -16,7 +18,9 @@ static func spawn(tree: SceneTree, id: String, at: Vector2, size := 1.0, angle :
 	var layer := tree.get_first_node_in_group("fx_layer")
 	if layer == null:
 		return null
-	if PassiveEffectDB.EFFECTS.has(id) and layer.get_child_count() >= PassiveEffectDB.MAX_VISIBLE:
+	var passive := PassiveEffectDB.EFFECTS.has(id)
+	var pending := int(layer.get_meta(PENDING_META, 0))
+	if passive and layer.get_child_count() + pending >= PassiveEffectDB.MAX_VISIBLE:
 		return null
 	var effect := CombatEffect.new()
 	effect.effect_id = id
@@ -24,8 +28,19 @@ static func spawn(tree: SceneTree, id: String, at: Vector2, size := 1.0, angle :
 	effect.rotation = angle
 	effect.display_scale = clampf(size, 0.1, MAX_DISPLAY_SCALE)
 	effect.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	if passive:
+		# 같은 프레임의 요새화도 한도를 지키도록 지연 추가 전에 자리를 예약한다.
+		layer.set_meta(PENDING_META, pending + 1)
+		effect._reserved_slot = true
 	layer.add_child.call_deferred(effect)
 	return effect
+
+
+func _ready() -> void:
+	if _reserved_slot:
+		var layer := get_parent()
+		layer.set_meta(PENDING_META, maxi(0, int(layer.get_meta(PENDING_META, 0)) - 1))
+		_reserved_slot = false
 
 
 func _process(delta: float) -> void:

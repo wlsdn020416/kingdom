@@ -463,6 +463,12 @@ func _check_passive_effects(main: Main) -> void:
 		if is_instance_valid(effect):
 			expired = false
 	_check(expired and main.player.hp == hp_before and main.player.progression.xp == xp_before, "패시브 그림은 수명 뒤 제거되고 체력·경험치를 바꾸지 않음")
+	var admitted := 0
+	for i in PassiveEffectDB.MAX_VISIBLE + 12:
+		if CombatEffect.spawn(get_tree(), "passive_fortify", main.player.global_position, 1.0) != null:
+			admitted += 1
+	_check(admitted <= PassiveEffectDB.MAX_VISIBLE and admitted > 0, "같은 프레임에 요청한 대규모 요새화도 표시 수 한도를 넘지 않음")
+	await get_tree().create_timer(0.85).timeout
 	var actor := Player.new()
 	var camera := Camera2D.new()
 	camera.name = "Camera"
