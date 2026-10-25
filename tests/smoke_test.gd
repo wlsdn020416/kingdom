@@ -20,8 +20,14 @@ func _ready() -> void:
 	_check(error == "" and main.kingdom.buildings.has(wall_cell), "나무벽 건설 %s" % error)
 	_check(main.kingdom.build(main.kingdom.core_cell() + Vector2i(30, 0), "wood_wall", main.player.global_position) != "", "영토 밖 건설은 거부됨")
 
+	var dash_event := InputEventAction.new()
+	dash_event.action = "dash"
+	dash_event.pressed = true
+	Input.parse_input_event(dash_event)
+	await _frames(2)
+	_check(main.player.dash_cooldown_left() > 0.0, "Space 대시는 장비 없이 사용 가능, 사용 후 쿨타임")
 	main.player.use_skill(0)
-	_check(not main.player.equipment.is_ready("dash_boots"), "스킬바 1번(대시) 사용 후 쿨타임")
+	_check(not main.player.equipment.is_ready("life_charm"), "스킬바 1번(치유) 사용 후 쿨타임")
 
 	var bag_before := main.player.equipment.bag.size()
 	var wood_before: int = main.kingdom.stock["wood"]

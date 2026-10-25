@@ -8,6 +8,7 @@ const KEYS := {
 	"move_down": [KEY_S],
 	"move_left": [KEY_A],
 	"move_right": [KEY_D],
+	"dash": [KEY_SPACE],
 	"skill_1": [KEY_1],
 	"skill_2": [KEY_2],
 	"skill_3": [KEY_3],

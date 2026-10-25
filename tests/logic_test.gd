@@ -27,14 +27,14 @@ func _test_world_is_deterministic() -> void:
 ## 스킬바: 스킬 있는 장비만, 슬롯 순서대로 빈칸 없이, 최대 4개
 func _test_skill_bar() -> void:
 	var equipment := Equipment.new()
-	_check(Array(equipment.skill_bar()) == ["dash_boots", "life_charm"],
-		"시작 장비 스킬바 = 대시, 치유 (스킬 없는 장비는 자리 차지 안 함) %s" % [equipment.skill_bar()])
+	_check(Array(equipment.skill_bar()) == ["life_charm"],
+		"시작 장비 스킬바 = 치유 (스킬 없는 장비는 자리 차지 안 함) %s" % [equipment.skill_bar()])
 	for id in ["fire_staff", "bomb_bag", "guardian_armor"]:
 		equipment.add_to_bag(id)
 		equipment.equip(id)
-	_check(Array(equipment.skill_bar()) == ["fire_staff", "bomb_bag", "guardian_armor", "dash_boots"],
-		"스킬 5개면 슬롯 순서로 앞의 4개 %s" % [equipment.skill_bar()])
-	_check(equipment.hidden_skill_count() == 1, "넘친 스킬 1개는 숨김")
+	_check(Array(equipment.skill_bar()) == ["fire_staff", "bomb_bag", "guardian_armor", "life_charm"],
+		"스킬은 슬롯 순서대로 빈칸 없이 %s" % [equipment.skill_bar()])
+	_check(equipment.hidden_skill_count() == 0, "4개까지는 숨김 없음")
 	_check(equipment.bag.has("old_bow") and not equipment.bag.has("fire_staff"), "교체된 장비는 가방으로")
 	equipment.unequip("weapon")
 	_check(equipment.item_in("weapon") == "fire_staff", "무기는 해제할 수 없음")
@@ -42,10 +42,12 @@ func _test_skill_bar() -> void:
 
 func _test_cooldown() -> void:
 	var equipment := Equipment.new()
-	equipment.start_cooldown("dash_boots")
-	_check(not equipment.is_ready("dash_boots"), "사용 직후 쿨타임")
-	equipment.tick(ItemDB.ITEMS["dash_boots"]["skill"]["cooldown"])
-	_check(equipment.is_ready("dash_boots"), "쿨타임만큼 지나면 다시 사용 가능")
+	equipment.start_cooldown("life_charm")
+	_check(not equipment.is_ready("life_charm"), "사용 직후 쿨타임")
+	equipment.tick(ItemDB.ITEMS["life_charm"]["skill"]["cooldown"])
+	_check(equipment.is_ready("life_charm"), "쿨타임만큼 지나면 다시 사용 가능")
+	_check(not ItemDB.ITEMS.values().any(func(item: Dictionary) -> bool: return item.get("skill", {}).get("id") == "dash"),
+		"대시는 장비 스킬이 아님 (기본 능력)")
 
 
 func _check(ok: bool, label: String) -> void:

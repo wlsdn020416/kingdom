@@ -11,7 +11,7 @@ const SLOT_NAMES := {
 }
 
 const STARTING_EQUIPMENT := {
-	"weapon": "old_bow", "head": "leather_cap", "boots": "dash_boots", "charm": "life_charm",
+	"weapon": "old_bow", "head": "leather_cap", "charm": "life_charm",
 }
 
 const ITEMS := {
@@ -41,10 +41,6 @@ const ITEMS := {
 		"skill": {"id": "shield", "name": "보호막", "cooldown": 12.0, "duration": 2.5},
 	},
 	"chain_mail": {"name": "사슬 갑옷", "slot": "armor", "hp": 40.0},
-	"dash_boots": {
-		"name": "질주 장화", "slot": "boots",
-		"skill": {"id": "dash", "name": "대시", "cooldown": 2.5},
-	},
 	"cloth_shoes": {"name": "천 신발", "slot": "boots", "speed_bonus": 0.15},
 	"life_charm": {
 		"name": "생명의 부적", "slot": "charm",

@@ -1,7 +1,7 @@
 class_name Player
 extends CharacterBody2D
 ## 트윈스틱 조작 캐릭터. 이동(WASD)과 조준(마우스)은 서로 독립적이다.
-## 캐릭터 자체에는 스킬이 없고, 1~4 키는 장비에 달린 스킬을 쓴다.
+## 대시(Space)는 모든 캐릭터의 기본 능력이고, 1~4 키는 장비에 달린 스킬을 쓴다.
 
 const DASH_SPEED := 950.0
 const DASH_TIME := 0.18
@@ -23,6 +23,7 @@ var _invuln_time := 0.0
 var _shield_time := 0.0
 var _dash_time := 0.0
 var _dash_velocity := Vector2.ZERO
+var _dash_cooldown := 0.0
 var _respawn_time := 0.0
 var _shake := 0.0
 
@@ -50,6 +51,7 @@ func _physics_process(delta: float) -> void:
 	_invuln_time -= delta
 	_shield_time -= delta
 	_fire_cooldown -= delta
+	_dash_cooldown -= delta
 	if _dash_time > 0.0:
 		_dash_time -= delta
 		velocity = _dash_velocity
@@ -71,7 +73,13 @@ func _process(delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if not skills_enabled or is_dead:
+	if is_dead:
+		return
+	if event.is_action_pressed("dash"):
+		dash()
+		get_viewport().set_input_as_handled()
+		return
+	if not skills_enabled:
 		return
 	for slot in Equipment.MAX_SKILLS:
 		if event.is_action_pressed("skill_%d" % (slot + 1)):
@@ -94,11 +102,18 @@ func fire(params: Dictionary) -> void:
 
 
 func dash() -> void:
+	if _dash_cooldown > 0.0:
+		return
+	_dash_cooldown = Balance.DASH_COOLDOWN
 	var direction := _move_input()
 	if direction == Vector2.ZERO:
 		direction = aim_direction
 	_dash_velocity = direction.normalized() * DASH_SPEED
 	_dash_time = DASH_TIME
+
+
+func dash_cooldown_left() -> float:
+	return maxf(0.0, _dash_cooldown)
 
 
 func heal(amount: float) -> void:

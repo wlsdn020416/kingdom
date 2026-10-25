@@ -1,6 +1,6 @@
 class_name ActionBar
 extends Control
-## 화면 아래 바. 평소엔 장비 스킬바(1~4), 건설 모드에선 건물 목록을 보여준다.
+## 화면 아래 바. 평소엔 대시(Space)와 장비 스킬바(1~4), 건설 모드에선 건물 목록을 보여준다.
 
 const SLOT_SIZE := Vector2(72, 54)
 const BUILD_SLOT_SIZE := Vector2(110, 54)
@@ -35,24 +35,34 @@ func _draw_skill_bar() -> void:
 	var font := ThemeDB.fallback_font
 	var equipment := _player.equipment
 	var bar := equipment.skill_bar()
-	var start := _row_start(Equipment.MAX_SKILLS, SLOT_SIZE.x)
+	# 맨 왼쪽 칸은 대시, 그 뒤로 스킬 1~4
+	var start := _row_start(Equipment.MAX_SKILLS + 1, SLOT_SIZE.x)
+	_draw_skill_slot(Rect2(start, SLOT_SIZE), "Space", "dash", "대시", _player.dash_cooldown_left(), Balance.DASH_COOLDOWN)
 	for i in Equipment.MAX_SKILLS:
-		var rect := Rect2(start + Vector2(i * (SLOT_SIZE.x + GAP), 0), SLOT_SIZE)
-		_draw_slot(rect, false)
-		draw_string(font, rect.position + Vector2(5, 14), str(i + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, UiKit.MUTED)
+		var rect := Rect2(start + Vector2((i + 1) * (SLOT_SIZE.x + GAP), 0), SLOT_SIZE)
 		if i >= bar.size():
+			_draw_skill_slot(rect, str(i + 1), "", "", 0.0, 1.0)
 			continue
 		var skill: Dictionary = ItemDB.ITEMS[bar[i]]["skill"]
-		draw_rect(Rect2(rect.position + Vector2(SLOT_SIZE.x / 2.0 - 8.0, 10), Vector2(16, 16)), Skills.color(skill["id"]))
-		draw_string(font, rect.position + Vector2(0, 46), skill["name"], HORIZONTAL_ALIGNMENT_CENTER, SLOT_SIZE.x, 12, UiKit.TEXT)
-		var left := equipment.cooldown_left(bar[i])
-		if left > 0.0:
-			var ratio := left / float(skill["cooldown"])
-			draw_rect(Rect2(rect.position.x, rect.end.y - rect.size.y * ratio, rect.size.x, rect.size.y * ratio), Color(0, 0, 0, 0.7))
-			draw_string(font, rect.position + Vector2(0, 32), "%.1f" % left, HORIZONTAL_ALIGNMENT_CENTER, SLOT_SIZE.x, 13, Color.WHITE)
+		_draw_skill_slot(rect, str(i + 1), skill["id"], skill["name"], equipment.cooldown_left(bar[i]), skill["cooldown"])
 	var hidden := equipment.hidden_skill_count()
 	if hidden > 0:
 		draw_string(font, Vector2(0, -8), "스킬바가 가득 차서 스킬 %d개가 숨겨졌습니다" % hidden, HORIZONTAL_ALIGNMENT_CENTER, size.x, 12, UiKit.MUTED)
+
+
+## skill_id가 ""이면 빈칸
+func _draw_skill_slot(rect: Rect2, key: String, skill_id: String, skill_name: String, cooldown_left: float, cooldown: float) -> void:
+	var font := ThemeDB.fallback_font
+	_draw_slot(rect, false)
+	draw_string(font, rect.position + Vector2(5, 14), key, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, UiKit.MUTED)
+	if skill_id == "":
+		return
+	draw_rect(Rect2(rect.position + Vector2(SLOT_SIZE.x / 2.0 - 8.0, 10), Vector2(16, 16)), Skills.color(skill_id))
+	draw_string(font, rect.position + Vector2(0, 46), skill_name, HORIZONTAL_ALIGNMENT_CENTER, SLOT_SIZE.x, 12, UiKit.TEXT)
+	if cooldown_left > 0.0:
+		var ratio := cooldown_left / cooldown
+		draw_rect(Rect2(rect.position.x, rect.end.y - rect.size.y * ratio, rect.size.x, rect.size.y * ratio), Color(0, 0, 0, 0.7))
+		draw_string(font, rect.position + Vector2(0, 32), "%.1f" % cooldown_left, HORIZONTAL_ALIGNMENT_CENTER, SLOT_SIZE.x, 13, Color.WHITE)
 
 
 func _draw_build_bar() -> void:

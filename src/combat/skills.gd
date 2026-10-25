@@ -17,8 +17,6 @@ static func color(skill_id: String) -> Color:
 static func cast(skill: Dictionary, player: Player) -> void:
 	var id: String = skill["id"]
 	match id:
-		"dash":
-			player.dash()
 		"heal":
 			player.heal(skill["amount"])
 		"shield":

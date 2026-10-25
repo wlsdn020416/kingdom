@@ -26,6 +26,7 @@ const DAWN_LENGTH := 5.0
 const PLAYER_BASE_HP := 100.0
 const PLAYER_SPEED := 190.0
 const PLAYER_HIT_INVULN := 0.4
+const DASH_COOLDOWN := 2.5  # 대시는 장비가 아닌 기본 능력 (Space)
 const RESPAWN_TIME := 6.0
 const RESPAWN_INVULN := 2.0
 
