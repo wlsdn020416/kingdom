@@ -7,6 +7,10 @@ const DASH_SPEED := 950.0
 const DASH_TIME := 0.18
 const LIGHT_RADIUS := 230.0
 const SWING_SHOW_TIME := 0.12  # 근거리 공격 궤적이 보이는 시간
+## 가로 한 줄 시트: 정면 4칸, 뒷면 4칸, 오른쪽 측면 4칸(왼쪽은 좌우 반전). 각 방향 0·2번 칸이 서 있는 자세.
+const SPRITE_SHEET := preload("res://assets/characters/player.png")
+const SPRITE_FRAMES_PER_DIR := 4
+const WALK_FPS := 8.0
 
 @onready var camera: Camera2D = $Camera
 
@@ -28,10 +32,17 @@ var _dash_cooldown := 0.0
 var _swing_time := 0.0
 var _respawn_time := 0.0
 var _shake := 0.0
+var _sprite := Sprite2D.new()
+var _walk_time := 0.0
 
 
 func _ready() -> void:
 	hp = equipment.max_hp()
+	_sprite.texture = SPRITE_SHEET
+	_sprite.hframes = SPRITE_FRAMES_PER_DIR * 3
+	# 발이 충돌 원 중심보다 조금 아래에 오도록 올린다
+	_sprite.position = Vector2(0, -4)
+	add_child(_sprite)
 	equipment.changed.connect(func() -> void: hp = minf(hp, equipment.max_hp()))
 	Fx.add_light(self, LIGHT_RADIUS)
 
@@ -65,6 +76,7 @@ func _physics_process(delta: float) -> void:
 	var to_mouse := get_global_mouse_position() - global_position
 	if to_mouse.length() > 1.0:
 		aim_direction = to_mouse.normalized()
+	_update_sprite(delta)
 	if attack_enabled and Input.is_action_pressed("attack") and _fire_cooldown <= 0.0:
 		_fire_weapon()
 	queue_redraw()
@@ -144,6 +156,7 @@ func _die() -> void:
 	_respawn_time = Balance.RESPAWN_TIME
 	collision_layer = 0
 	Fx.burst(get_tree(), global_position, Color("ff7060"), 20)
+	_sprite.visible = false
 	Events.player_died.emit()
 	Events.message.emit("쓰러졌습니다. %d초 뒤 왕국에서 부활합니다" % Balance.RESPAWN_TIME)
 	queue_redraw()
@@ -155,6 +168,7 @@ func _respawn() -> void:
 	global_position = spawn_point
 	collision_layer = PhysicsLayers.PLAYER
 	_invuln_time = Balance.RESPAWN_INVULN
+	_sprite.visible = true
 
 
 func respawn_time_left() -> float:
@@ -175,14 +189,25 @@ func _move_input() -> Vector2:
 	return Input.get_vector("move_left", "move_right", "move_up", "move_down")
 
 
-## 임시 그림. Phase 2에서 AnimatedSprite2D로 교체.
+## 트윈스틱이라 이동 방향이 아니라 조준 방향을 바라본다. 걷기 칸은 움직일 때만 넘긴다.
+func _update_sprite(delta: float) -> void:
+	var direction := 2  # 측면
+	if absf(aim_direction.y) > absf(aim_direction.x):
+		direction = 0 if aim_direction.y > 0.0 else 1
+	_sprite.flip_h = direction == 2 and aim_direction.x < 0.0
+	if velocity.length() > 1.0:
+		_walk_time += delta
+	else:
+		_walk_time = 0.0
+	var step := int(_walk_time * WALK_FPS) % SPRITE_FRAMES_PER_DIR
+	_sprite.frame = direction * SPRITE_FRAMES_PER_DIR + step
+	_sprite.visible = not (_invuln_time > 0.0 and int(Time.get_ticks_msec() / 60.0) % 2 == 0)
+
+
+## 몸은 _sprite가 그리고, 여기서는 무기 방향·공격 궤적·보호막만 그린다.
 func _draw() -> void:
 	if is_dead:
 		return
-	if _invuln_time > 0.0 and int(Time.get_ticks_msec() / 60.0) % 2 == 0:
-		return
-	draw_rect(Rect2(-9, -10, 18, 20), Color("2b5fa8"))
-	draw_rect(Rect2(-6, -14, 12, 9), Color("f0d0a0"))
 	draw_line(Vector2.ZERO, aim_direction * 20.0, Color("e8e0c8"), 3.0)
 	if _swing_time > 0.0:
 		var weapon := equipment.weapon()

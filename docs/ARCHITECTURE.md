@@ -38,7 +38,7 @@ Main (Node2D, scenes/main.gd)          조립 지점: 모든 시스템의 setup(
 ```
 
 `[이름]`은 노드 그룹. 코드에서 추가되는 그룹: `enemies`(Enemy), `lights`(Fx.add_light).
-`Enemy`, `Building`, `Projectile`, UI 패널은 `.tscn` 없이 코드로 생성하고 `_draw()`로 임시 도형을 그린다.
+`Enemy`, `Building`, `Projectile`, UI 패널은 `.tscn` 없이 코드로 생성하고 `_draw()`로 임시 도형을 그린다. 플레이어 몸은 `Player`가 코드로 붙이는 `Sprite2D`(`assets/characters/player.png`, D-012)가 그리고 `_draw()`는 무기 방향·공격 궤적·보호막만 그린다.
 
 ## 3. 계층과 허용되는 의존 방향
 
