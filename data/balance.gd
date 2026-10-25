@@ -16,7 +16,9 @@ const RESOURCE_NAMES := {
 	"hardwood": "단단한 목재", "copper": "구리", "iron_ore": "철광석", "moss": "이끼", "obsidian": "흑요석",
 	"tough_hide": "질긴 가죽", "venom_sting": "전갈 독침", "ice_crystal": "얼음 결정",
 	"swamp_ooze": "늪 점액", "fire_core": "화염 핵",
+	"coal": "석탄", "resin": "송진", "boss_essence": "보스의 정수",
 }
+const BOSS_ESSENCE_PER_BOSS := 1  # 보스를 잡으면 왕국 창고로 들어오는 보스의 정수 (D-022)
 const CORE_MAX_HP := 1000.0
 const REPAIR_COST := {"wood": 10, "stone": 5}
 const REPAIR_AMOUNT := 80.0
@@ -52,6 +54,9 @@ const WANDERER_AGGRO := 10.0 * TILE
 const ENEMY_ATTACK_INTERVAL := 0.8
 const WAVE_SPAWN_WINDOW := 22.0  # 밤이 시작되고 이 시간 안에 웨이브가 다 나온다
 const WAVE_SPAWN_RING := Vector2(16, 22)  # 핵에서 칸 단위 최소/최대
+const WAVE_SIZE_MAX := 110  # 한 밤 침공 적 수 상한 (성능). 그 뒤로는 체력·피해 배율로 어려워진다
+const FINAL_DAY := 21  # 이 날 밤의 최종 보스를 잡으면 승리 (D-021, 임시)
+const BOSS_HP_PER_EXTRA_PLAYER := 0.6  # 보스 체력: 플레이어가 한 명 늘 때마다 기본의 60%씩 더
 
 # 경험치 (D-015, 수치 임시). 처치 경험치는 EnemyDB의 "xp"
 const XP_HARVEST_BY_TIER := [1, 2, 3, 4]  # 부순 오브젝트가 있던 바이옴 단계별
@@ -63,20 +68,38 @@ static func tower_xp_share(xp: int, players: int) -> int:
 	return ceili(float(xp) / maxi(1, players))
 
 
+## 난이도 곡선 (D-021, 가파르게, 수치 임시). 1일차 10마리 → 9일차 52 → 18일차부터 상한 110
 static func wave_size(day: int) -> int:
-	return 5 + day * 3
+	return mini(WAVE_SIZE_MAX, 6 + day * 4 + floori(day * day / 8.0))
 
 
+## 침공 적 체력 배율: 6일차 약 2.4배, 12일차 약 4.9배, 21일차 약 10배
 static func wave_hp_scale(day: int) -> float:
-	return 1.0 + (day - 1) * 0.15
+	var d := day - 1
+	return 1.0 + d * 0.22 + d * d * 0.012
+
+
+## 침공 적 피해 배율: 21일차 2.4배
+static func wave_damage_scale(day: int) -> float:
+	return 1.0 + (day - 1) * 0.07
+
+
+## 낮에 돌아다니는 적도 날이 갈수록 강해진다 (침공보다 완만하게)
+static func wanderer_hp_scale(day: int) -> float:
+	return 1.0 + (day - 1) * 0.1
+
+
+static func wanderer_damage_scale(day: int) -> float:
+	return 1.0 + (day - 1) * 0.04
 
 
 static func is_boss_night(day: int) -> bool:
 	return day % 3 == 0
 
 
-static func boss_hp_scale(day: int) -> float:
-	return 1.0 + (floori(day / 3.0) - 1) * 0.35
+## 보스마다 기본 체력이 다르고(EnemyDB), 함께하는 플레이어 수만큼 더 단단해진다
+static func boss_hp_scale(players: int) -> float:
+	return 1.0 + maxi(0, players - 1) * BOSS_HP_PER_EXTRA_PLAYER
 
 
 ## {"wood": 3, "stone": 1} → "나무 +3 돌 +1"

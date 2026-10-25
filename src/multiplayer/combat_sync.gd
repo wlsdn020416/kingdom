@@ -6,6 +6,7 @@ extends Node
 ## RPC 경로가 모두에게 같아야 해서 Main이 이름 "CombatSync"로 붙인다. 혼자 플레이면 아무것도 하지 않는다.
 
 const SNAPSHOT_INTERVAL := 0.1  # 초당 10번
+const MAX_HITS_PER_SNAPSHOT := 48  # 피해 숫자는 적 모습과 함께 모아 보낸다. 넘치면 버린다 (연출일 뿐)
 ## 참가자가 보낸 공격 위치가 호스트가 아는 그 사람 위치에서 이보다 멀면 무시한다 (요청을 믿지 않는다, AGENTS 5절)
 const MAX_ATTACK_OFFSET := 4.0 * Balance.TILE
 const SOUND_REQUEST_INTERVAL_MS := 40
@@ -14,6 +15,8 @@ var _net: NetSession
 var _main: Main
 var _puppets := {}  # 적 net_id -> EnemyPuppet (참가자만)
 var _timer := 0.0
+var _pending_hits := []  # 호스트만: 다음 묶음에 보낼 피해 숫자
+var hits_received := 0  # 참가자: 받은 피해 숫자 수 (테스트용)
 var _sound_times := {}
 
 
@@ -30,6 +33,12 @@ func setup(net: NetSession, main: Main) -> void:
 		Events.world_sound_requested.connect(_relay_world_sound)
 		Events.enemy_killed.connect(func(enemy: Node) -> void: _enemy_died.rpc((enemy as Enemy).net_id))
 		Events.enemy_shot.connect(func(at: Vector2, params: Dictionary) -> void: _enemy_shot.rpc(at, params))
+		Events.damage_dealt.connect(func(at: Vector2, amount: float, emphasis: bool) -> void:
+			if _pending_hits.size() < MAX_HITS_PER_SNAPSHOT:
+				_pending_hits.append([at, amount, emphasis]))
+		Events.screen_shake_requested.connect(func(at: Vector2, strength: float) -> void:
+			if _main.player_sync.is_running():
+				_shake.rpc(at, strength))
 	else:
 		_main.player.attacked.connect(func(kind: String, data: Dictionary) -> void: _replay_attack.rpc_id(1, kind, data))
 		_main.day_night.follows_host = true
@@ -62,6 +71,19 @@ func _share_effect(id: String, at: Vector2, size: float, angle: float) -> void:
 @rpc("authority", "unreliable")
 func _effect(id: String, at: Vector2, size: float, angle: float) -> void:
 	CombatEffect.spawn(get_tree(), id, at, size, angle)
+
+
+## 호스트의 피해 숫자 묶음 [위치, 피해, 강조] (D-023)
+@rpc("authority", "unreliable")
+func _hits(hits: Array) -> void:
+	hits_received += hits.size()
+	for hit: Array in hits:
+		_main.show_damage(hit[0], hit[1], hit[2])
+
+
+@rpc("authority", "unreliable")
+func _shake(at: Vector2, strength: float) -> void:
+	_main.shake_screen(at, strength)
 
 
 func _relay_world_sound(id: String, at: Vector2) -> void:
@@ -112,6 +134,9 @@ func _physics_process(delta: float) -> void:
 		enemies.append(enemy.appearance())
 	var clock := _main.day_night
 	_snapshot.rpc(enemies, clock.phase, clock.day, clock.time, _main.kingdom.core.hp)
+	if not _pending_hits.is_empty():
+		_hits.rpc(_pending_hits)
+		_pending_hits = []
 
 
 # --- 호스트가 부르는 것 ---
@@ -122,9 +147,9 @@ func send_reward(peer_id: int, xp: int, resources: Dictionary, at: Vector2) -> v
 		_reward.rpc_id(peer_id, xp, resources, at)
 
 
-func send_game_over(summary: String) -> void:
+func send_game_over(summary: String, victory := false) -> void:
 	if _net.is_online() and _net.is_host():
-		_game_over.rpc(summary)
+		_game_over.rpc(summary, victory)
 
 
 # --- 참가자가 부르는 것 ---
@@ -177,8 +202,8 @@ func _reward(xp: int, resources: Dictionary, at: Vector2) -> void:
 
 
 @rpc("authority", "reliable")
-func _game_over(summary: String) -> void:
-	_main.show_game_over(summary)
+func _game_over(summary: String, victory: bool) -> void:
+	_main.show_game_over(summary, victory)
 
 
 ## 참가자의 공격을 호스트 화면에서 다시 실행한다. 적 피해와 나무·바위·상자 채집이 모두 여기서 정해지고,

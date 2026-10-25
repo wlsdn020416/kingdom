@@ -3,13 +3,16 @@ extends CharacterBody2D
 ## 적. 침공(invader) 적은 왕국 핵으로 가면서 길을 막는 벽·나무를 부순다.
 ## 낮에 돌아다니는 적은 플레이어가 가까이 오면 쫓아온다. 멀티플레이에서는 호스트에만 있고(D-017)
 ## 대상은 "player" 그룹(로컬 Player와 다른 사람의 RemotePlayer) 중 가장 가까운 살아 있는 플레이어다.
+## 보스는 EnemyDB의 "patterns"를 반복하고 체력이 줄면 "rage"로 빨라진다 (D-021). 패턴에는 무작위가 없다.
 
 const SPRITE_TEXTURE := preload("res://assets/enemies/enemies.png")
 const SPRITE_SIZE := 64
 const SPRITE_OFFSET := Vector2(-32, -40)
 const ANIMATION_FRAMES := 4
 const ANIMATION_FPS := 8.0
-const IDLE_ANIMATED := ["slime", "bog_slime", "fire_imp", "boss"]
+const IDLE_ANIMATED := ["slime", "bog_slime", "fire_imp"]  # 보스는 모두 호흡한다
+const SPIRAL_LIFETIME := 2.4
+const BULLET_COLOR := Color("d070ff")
 ## take_damage의 source: 플레이어는 멀티플레이 peer id(혼자·호스트 = 1), 화살탑은 이 값
 const SOURCE_TOWER := -1
 const SOURCE_LOCAL := 1
@@ -23,6 +26,9 @@ var hp := 1.0
 var max_hp := 1.0
 var radius := 10.0
 var is_invader := false
+var damage_scale := 1.0  # 날짜에 따른 피해 배율 (Balance.wave_damage_scale)
+var minion_hp_scale := 1.0  # 보스가 부르는 부하의 체력·피해 배율 (WaveSpawner가 그날 침공 배율로 정한다)
+var minion_damage_scale := 1.0
 var net_id := 0
 ## 마지막 일격을 준 쪽 (SOURCE_TOWER 또는 peer id). 처치 보상을 누구에게 줄지 정한다
 var killed_by := SOURCE_LOCAL
@@ -31,7 +37,19 @@ var _target: Node2D  # 이번 프레임에 노리는 플레이어 (Player 또는
 var _core: Core
 var _world: World
 var _attack_cooldown := 0.0
-var _shot_cooldown := 3.0
+var _pattern_timers: Array[float] = []
+var _radial_offset := false  # 원형 탄을 번갈아 반 칸씩 돌려 빈틈 위치를 바꾼다
+var _spiral := {}  # 진행 중인 회전 연사 패턴 (비었으면 없음)
+var _spiral_left := 0.0
+var _spiral_tick := 0.0
+var _spiral_angle := 0.0
+var _charge := {}  # 진행 중인 돌진 패턴
+var _charge_windup := 0.0
+var _charge_left := 0.0
+var _charge_direction := Vector2.ZERO
+var _minions: Array[Enemy] = []
+var _slow_factor := 1.0  # 서리탑에 맞으면 잠시 느려진다
+var _slow_time := 0.0
 var _flash := 0.0
 var _wander_direction := Vector2.RIGHT
 var _knockback := Vector2.ZERO
@@ -41,14 +59,28 @@ var _animation_frame := 0
 var _facing_left := false
 
 
-func setup(id: String, invader: bool, hp_scale := 1.0) -> Enemy:
+func setup(id: String, invader: bool, hp_scale := 1.0, scale_damage := 1.0) -> Enemy:
 	type_id = id
 	stats = EnemyDB.TYPES[id]
 	is_invader = invader
 	max_hp = stats["hp"] * hp_scale
 	hp = max_hp
 	radius = stats["radius"]
+	damage_scale = scale_damage
+	# 패턴마다 첫 사용 시점을 엇갈려 한꺼번에 쏟아지지 않게 한다
+	var patterns: Array = stats.get("patterns", [])
+	for i in patterns.size():
+		_pattern_timers.append(patterns[i]["interval"] * (0.4 + 0.2 * i))
 	return self
+
+
+func is_boss() -> bool:
+	return stats.get("is_boss", false)
+
+
+## 접촉·벽 공격 피해
+func contact_damage() -> float:
+	return stats["damage"] * damage_scale
 
 
 func _ready() -> void:
@@ -86,8 +118,14 @@ func _physics_process(delta: float) -> void:
 			_wander_direction = Vector2.from_angle(randf() * TAU)
 		target = global_position + _wander_direction * 50.0
 
-	var speed: float = stats["speed"] * (1.0 if chasing_player or is_invader else 0.4)
+	_slow_time -= delta
+	var slowed := _slow_factor if _slow_time > 0.0 else 1.0
+	var speed: float = stats["speed"] * (1.0 if chasing_player or is_invader else 0.4) * _rage("speed") * slowed
 	velocity = global_position.direction_to(target) * speed + _knockback
+	if _charge_windup > 0.0:
+		velocity = Vector2.ZERO
+	elif _charge_left > 0.0:
+		velocity = _charge_direction * float(_charge["speed"])
 	_knockback = _knockback.move_toward(Vector2.ZERO, 1200.0 * delta)
 	move_and_slide()
 	_update_animation(delta)
@@ -95,29 +133,44 @@ func _physics_process(delta: float) -> void:
 	if is_invader:
 		_attack_blockers()
 	_touch_player()
-	if stats.has("radial_shot"):
-		_radial_shot(delta)
+	if not _pattern_timers.is_empty():
+		_run_patterns(delta)
 	queue_redraw()
 
 
 ## source: 누가 때렸나 (SOURCE_TOWER 또는 peer id). 마지막 일격이 탑이면 처치 경험치를 모두 나눠 받는다 (D-015)
-func take_damage(amount: float, source := SOURCE_LOCAL) -> void:
+## emphasis: 패시브로 강해진 공격이면 피해 숫자를 강조한다 (D-023)
+func take_damage(amount: float, source := SOURCE_LOCAL, emphasis := false) -> void:
 	if _dying:
 		return
 	hp -= amount
+	Events.damage_dealt.emit(global_position, amount, emphasis)
 	Events.world_sound_requested.emit("enemy_death" if hp <= 0.0 else "hit_flesh", global_position)
 	_flash = 0.08
 	if hp <= 0.0:
 		_dying = true
 		killed_by = source
 		Fx.burst(get_tree(), global_position, stats["color"], 12)
+		if is_boss():
+			Events.screen_shake_requested.emit(Vector2.INF, 12.0)
 		Events.enemy_killed.emit(self)
 		queue_free()
 
 
-## 처형자 패시브: 체력이 낮은 적에게 기본 공격 피해를 더한다. bonus = 0.25면 +25%
-func damage_after_execute(amount: float, bonus: float) -> float:
-	return amount * (1.0 + bonus) if bonus > 0.0 and hp <= max_hp * PassiveDB.EXECUTE_HP_RATIO else amount
+## 처형자(체력이 낮은 적)·선제공격(체력이 가득 찬 적) 패시브로 기본 공격 피해를 더한다. bonus = 0.25면 +25%
+func damage_after_execute(amount: float, bonus: float, opener := 0.0) -> float:
+	if bonus > 0.0 and hp <= max_hp * PassiveDB.EXECUTE_HP_RATIO:
+		return amount * (1.0 + bonus)
+	if opener > 0.0 and hp >= max_hp:
+		return amount * (1.0 + opener)
+	return amount
+
+
+## 더 강한(낮은) 감속이 걸려 있으면 그쪽을 유지한다
+func slow(factor: float, duration: float) -> void:
+	if _slow_time <= 0.0 or factor <= _slow_factor:
+		_slow_factor = factor
+	_slow_time = maxf(_slow_time, duration)
 
 
 func knockback(impulse: Vector2) -> void:
@@ -167,12 +220,12 @@ func _attack_blockers() -> void:
 			var cell := _world.object_cell_near(collision.get_position() - collision.get_normal() * 2.0, 4.0)
 			if cell == World.NO_CELL:
 				continue
-			_world.damage_object(cell, stats["damage"], World.NOBODY)
+			_world.damage_object(cell, contact_damage(), World.NOBODY)
 		elif other is Building:
 			# 가시 벽 패시브가 때린 적에게 피해를 돌려줄 수 있게 공격자를 넘긴다
-			(other as Building).take_damage(stats["damage"], self)
+			(other as Building).take_damage(contact_damage(), self)
 		elif other != null and other.has_method("take_damage"):
-			other.take_damage(stats["damage"])
+			other.take_damage(contact_damage())
 		else:
 			continue
 		_attack_cooldown = Balance.ENEMY_ATTACK_INTERVAL
@@ -183,29 +236,106 @@ func _touch_player() -> void:
 	if _attack_cooldown > 0.0 or _target == null:
 		return
 	if global_position.distance_to(_target.global_position) < radius + 14.0:
-		_target.take_damage(stats["damage"])
+		# 돌진 중에 닿으면 돌진 피해
+		var amount: float = _charge["damage"] * damage_scale if _charge_left > 0.0 else contact_damage()
+		_target.take_damage(amount)
 		_attack_cooldown = Balance.ENEMY_ATTACK_INTERVAL
 
 
-func _radial_shot(delta: float) -> void:
-	var shot: Dictionary = stats["radial_shot"]
-	_shot_cooldown -= delta
-	if _shot_cooldown > 0.0:
-		return
-	_shot_cooldown = shot["interval"]
-	var count: int = shot["count"]
+## 지금 체력에 맞는 분노 배율 (rate: 패턴 속도, speed: 이동). 체력이 낮을수록 센 단계가 덮어쓴다
+func _rage(key: String) -> float:
+	var value := 1.0
+	for phase: Dictionary in stats.get("rage", []):
+		if hp <= max_hp * float(phase["at"]):
+			value = phase[key]
+	return value
+
+
+func _run_patterns(delta: float) -> void:
+	var patterns: Array = stats["patterns"]
+	var rate := _rage("rate")
+	for i in patterns.size():
+		_pattern_timers[i] -= delta * rate
+		if _pattern_timers[i] <= 0.0:
+			_pattern_timers[i] = patterns[i]["interval"]
+			_start_pattern(patterns[i])
+	if _spiral_left > 0.0:
+		_spiral_left -= delta
+		_spiral_angle += float(_spiral["turn"]) * delta
+		_spiral_tick -= delta
+		if _spiral_tick <= 0.0:
+			_spiral_tick = 1.0 / float(_spiral["rate"])
+			var arms: int = _spiral["arms"]
+			for arm in arms:
+				_shoot(Vector2.from_angle(_spiral_angle + TAU * arm / arms), _spiral, SPIRAL_LIFETIME)
+	if _charge_windup > 0.0:
+		_charge_windup -= delta
+		_flash = 0.05  # 돌진 직전 번쩍임 (참가자 화면에도 그대로 보인다)
+		if _charge_windup <= 0.0:
+			_charge_left = _charge["duration"]
+			Events.screen_shake_requested.emit(global_position, 6.0)
+			if _target != null:
+				_charge_direction = global_position.direction_to(_target.global_position)
+	elif _charge_left > 0.0:
+		_charge_left -= delta
+
+
+func _start_pattern(pattern: Dictionary) -> void:
+	match pattern["type"]:
+		"radial":
+			var count: int = pattern["count"]
+			var offset := PI / count if _radial_offset else 0.0
+			_radial_offset = not _radial_offset
+			for i in count:
+				_shoot(Vector2.from_angle(offset + TAU * i / count), pattern, pattern.get("lifetime", 2.2))
+		"spiral":
+			_spiral = pattern
+			_spiral_left = pattern["duration"]
+			_spiral_tick = 0.0
+		"fan":
+			if _target == null:
+				return
+			var aim := global_position.direction_to(_target.global_position)
+			var count: int = pattern["count"]
+			var arc := deg_to_rad(pattern["arc"])
+			for i in count:
+				var t := 0.5 if count == 1 else float(i) / (count - 1)
+				_shoot(aim.rotated((t - 0.5) * arc), pattern, 2.0)
+		"charge":
+			if _charge_windup <= 0.0 and _charge_left <= 0.0 and _target != null:
+				_charge = pattern
+				_charge_windup = pattern["windup"]
+		"summon":
+			_summon(pattern)
+		_:
+			push_warning("알 수 없는 보스 패턴: %s" % pattern["type"])
+
+
+func _shoot(direction: Vector2, pattern: Dictionary, lifetime: float) -> void:
+	Projectile.spawn(get_tree(), global_position, {
+		"direction": direction, "speed": pattern["speed"], "damage": pattern["damage"] * damage_scale,
+		"lifetime": lifetime, "radius": pattern.get("radius", 6.0), "color": BULLET_COLOR, "team": Projectile.Team.ENEMY,
+	})
+
+
+## 부하는 침공 적이라 핵으로 가고 아침에 사라진다. 너무 많이 쌓이지 않게 살아 있는 수를 센다
+func _summon(pattern: Dictionary) -> void:
+	_minions = _minions.filter(func(minion: Enemy) -> bool: return is_instance_valid(minion) and not minion._dying)
+	var count := mini(pattern["count"], int(pattern["max_alive"]) - _minions.size())
 	for i in count:
-		Projectile.spawn(get_tree(), global_position, {
-			"direction": Vector2.from_angle(TAU * i / count), "speed": shot["speed"], "damage": shot["damage"],
-			"lifetime": 2.2, "radius": 6.0, "color": Color("d070ff"), "team": Projectile.Team.ENEMY,
-		})
+		var minion := Enemy.new().setup(pattern["minion"], true, minion_hp_scale, minion_damage_scale)
+		minion.position = global_position + Vector2.from_angle(TAU * i / maxi(count, 1)) * (radius + 24.0)
+		get_parent().add_child.call_deferred(minion)
+		_minions.append(minion)
+	if count > 0:
+		Fx.burst(get_tree(), global_position, stats["color"], 16, 200.0)
 
 
 ## 이동이 멈추면 걷기도 멈추고, 젤리·불꽃·보스의 호흡만 계속 움직인다.
 func _update_animation(delta: float) -> void:
 	if absf(velocity.x) > 1.0:
 		_facing_left = velocity.x < 0.0
-	if velocity.length() > 1.0 or type_id in IDLE_ANIMATED:
+	if velocity.length() > 1.0 or type_id in IDLE_ANIMATED or is_boss():
 		_animation_time += delta
 	else:
 		_animation_time = 0.0
@@ -221,7 +351,7 @@ static func draw_body(canvas: CanvasItem, id: String, frame: int, facing_left: b
 	var info: Dictionary = EnemyDB.TYPES[id]
 	var row: int = info["sprite_row"]
 	var region := Rect2(Vector2(frame * SPRITE_SIZE, row * SPRITE_SIZE), Vector2.ONE * SPRITE_SIZE)
-	var tint := Color(2.4, 2.4, 2.4) if flashing else Color.WHITE
+	var tint: Color = Color(2.4, 2.4, 2.4) if flashing else info.get("tint", Color.WHITE)
 	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2(-1 if facing_left else 1, 1))
 	canvas.draw_texture_rect_region(SPRITE_TEXTURE, Rect2(SPRITE_OFFSET, Vector2.ONE * SPRITE_SIZE), region, tint)
 	canvas.draw_set_transform(Vector2.ZERO)

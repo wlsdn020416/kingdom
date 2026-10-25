@@ -1,14 +1,15 @@
 class_name GameOverPanel
 extends Control
-## 왕국 멸망 화면. 처음으로 돌아가면 게임 씬을 버려서 진행 상황이 완전히 초기화된다.
+## 판이 끝난 화면: 왕국 멸망 또는 최종 보스 처치(승리, D-021). 처음으로 돌아가면 게임 씬을 버려서 진행 상황이 완전히 초기화된다.
 
+var _title: Label
 var _summary: Label
 
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	var box := UiKit.dialog(self, "왕국 멸망")
-	(box.get_child(0) as Label).add_theme_color_override("font_color", UiKit.DANGER)
+	_title = box.get_child(0) as Label
 	_summary = UiKit.note("")
 	box.add_child(_summary)
 	box.add_child(UiKit.note("진행 상황이 모두 초기화됩니다."))
@@ -16,7 +17,9 @@ func _ready() -> void:
 	hide()
 
 
-func open(summary: String) -> void:
+func open(summary: String, victory := false) -> void:
+	_title.text = "승리!" if victory else "왕국 멸망"
+	_title.add_theme_color_override("font_color", UiKit.ACCENT if victory else UiKit.DANGER)
 	_summary.text = summary
 	show()
 

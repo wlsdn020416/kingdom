@@ -3,6 +3,11 @@ extends Node2D
 ## 한 판의 게임. 시스템들을 서로 연결하고 전역 단축키를 처리한다.
 ## 왕국이 멸망하면 Session이 이 씬을 통째로 버리고 시작 화면으로 돌아간다.
 
+const SHAKE_RANGE := 640.0  # 이 거리 밖의 폭발·돌진은 화면을 흔들지 않는다 (D-023)
+const HITSTOP_SCALE := 0.05  # 멈칫: 게임 속도를 잠깐 이만큼 늦춘다. 혼자 플레이에서만
+const HITSTOP_EMPHASIS := 0.05  # 강조 공격 멈칫 시간(초, 실제 시간)
+const HITSTOP_BOSS := 0.15  # 보스 처치 멈칫
+
 @onready var world: World = $World
 @onready var kingdom: Kingdom = $Kingdom
 @onready var player: Player = $Player
@@ -43,6 +48,8 @@ func _ready() -> void:
 	hud.setup(self)
 	_setup_audio()
 	Events.combat_effect_requested.connect(func(id: String, at: Vector2, size: float, angle: float) -> void: CombatEffect.spawn(get_tree(), id, at, size, angle))
+	Events.damage_dealt.connect(show_damage)
+	Events.screen_shake_requested.connect(shake_screen)
 	player_sync.name = "PlayerSync"
 	player_sync.setup(Session.net, player, self)
 	add_child(player_sync)
@@ -74,6 +81,7 @@ func _ready() -> void:
 	Events.enemy_killed.connect(_on_enemy_killed)
 	Events.core_destroyed.connect(_on_core_destroyed)
 	Events.night_started.connect(_on_night_started)
+	Events.day_started.connect(_on_day_started)
 
 	world.reveal(player.global_position)
 	Events.message.emit("1일차 아침 · 시드 \"%s\"" % Session.seed_text)
@@ -83,10 +91,68 @@ func _ready() -> void:
 func _physics_process(_delta: float) -> void:
 	_update_footsteps(_delta)
 	world.reveal(player.global_position)
+	player.in_territory = kingdom.in_territory(world.cell_at(player.global_position))
+	_campfire_heal(_delta)
 	if not player.is_dead:
 		var moved := kingdom_sync.deposit()
 		if not moved.is_empty():
 			show_deposit(moved)
+
+
+## 모닥불(D-022) 근처에 있으면 체력이 차오른다. 내 캐릭터는 내 화면이 정한다
+func _campfire_heal(delta: float) -> void:
+	for building: Building in kingdom.buildings.values():
+		var aura: Array = building.info.get("heal_aura", [])
+		if not aura.is_empty() and building.global_position.distance_to(player.global_position) <= float(aura[0]) * Balance.TILE:
+			player.restore(float(aura[1]) * delta)
+			return
+
+
+## 살아 있는 보스 하나 {"id", "ratio", "key"}. 없으면 {}. 호스트는 Enemy, 참가자는 EnemyPuppet을 본다 (ThreatBanner)
+func boss_status() -> Dictionary:
+	for child in $Enemies.get_children():
+		if child.is_queued_for_deletion():
+			continue
+		if child is Enemy and (child as Enemy).is_boss():
+			var boss := child as Enemy
+			return {"id": boss.type_id, "ratio": boss.hp / boss.max_hp, "key": boss.get_instance_id()}
+		if child is EnemyPuppet and EnemyDB.TYPES[(child as EnemyPuppet).type_id].get("is_boss", false):
+			var puppet := child as EnemyPuppet
+			return {"id": puppet.type_id, "ratio": puppet.hp_ratio(), "key": puppet.get_instance_id()}
+	return {}
+
+
+## 피해 숫자 (D-023). 참가자 화면에는 CombatSync가 호스트의 숫자를 모아서 보낸다
+func show_damage(at: Vector2, amount: float, emphasis: bool) -> void:
+	Fx.damage_number(get_tree(), at, amount, emphasis)
+	if emphasis:
+		_hitstop(HITSTOP_EMPHASIS)
+
+
+## 내 캐릭터와 가까울수록 세게 흔든다. 무한 좌표(보스 등장·처치)는 거리와 무관
+func shake_screen(at: Vector2, strength: float) -> void:
+	var falloff := 1.0
+	if at.is_finite():
+		falloff = 1.0 - player.global_position.distance_to(at) / SHAKE_RANGE
+	if falloff > 0.0:
+		player.add_shake(strength * falloff)
+	if not at.is_finite() and strength >= 10.0:
+		_hitstop(HITSTOP_BOSS)
+
+
+var _hitstopping := false
+
+
+## 멈칫: 게임 속도를 실제 시간 duration초 동안 늦춘다. 멀티플레이에서는 호스트 속도가 모두의 게임을 바꾸므로 하지 않는다
+func _hitstop(duration: float) -> void:
+	if Session.net.is_online() or _hitstopping or get_tree().paused:
+		return
+	_hitstopping = true
+	var before := Engine.time_scale
+	Engine.time_scale = before * HITSTOP_SCALE
+	await get_tree().create_timer(duration, true, false, true).timeout
+	Engine.time_scale = before
+	_hitstopping = false
 
 
 func show_deposit(moved: Dictionary) -> void:
@@ -96,7 +162,7 @@ func show_deposit(moved: Dictionary) -> void:
 
 func _process(_delta: float) -> void:
 	player.attack_enabled = not (build_mode.active or hud.build_menu.visible or hud.equipment_panel.visible
-		or hud.storage_panel.visible or hud.crafting_panel.visible or hud.passive_panel.visible
+		or hud.storage_panel.visible or hud.crafting_panel.visible or hud.passive_panel.visible or hud.teleport_panel.visible
 		or hud.is_pointer_over_status())
 	player.skills_enabled = not build_mode.active
 
@@ -140,6 +206,7 @@ func _close_overlays() -> void:
 	hud.equipment_panel.hide()
 	hud.storage_panel.hide()
 	hud.crafting_panel.hide()
+	hud.teleport_panel.hide()
 	hud.passive_panel.hide()
 	hud.close_big_map()
 
@@ -155,9 +222,10 @@ func _toggle_build_menu() -> void:
 
 ## E: 장비 상자·제작대 창을 열고 닫거나, 월드의 보물 상자를 연다
 func _interact() -> void:
-	if hud.storage_panel.visible or hud.crafting_panel.visible:
+	if hud.storage_panel.visible or hud.crafting_panel.visible or hud.teleport_panel.visible:
 		hud.storage_panel.hide()
 		hud.crafting_panel.hide()
+		hud.teleport_panel.hide()
 		return
 	if player.is_dead:
 		return
@@ -168,6 +236,10 @@ func _interact() -> void:
 	var workbench := kingdom.find_workbench_near(player.global_position)
 	if workbench != World.NO_CELL:
 		hud.crafting_panel.open(workbench)
+		return
+	var teleport := kingdom.find_teleport_near(player.global_position)
+	if teleport != World.NO_CELL:
+		hud.teleport_panel.open(teleport)
 		return
 	var chest := world.find_chest_near(player.global_position)
 	if chest == World.NO_CELL:
@@ -219,8 +291,15 @@ func grant_chest(reward: Dictionary, at: Vector2) -> void:
 func _on_enemy_killed(enemy: Node) -> void:
 	kills += 1
 	var killed := enemy as Enemy
-	if killed.stats.get("is_boss", false):
-		Events.message.emit("보스 처치!")
+	if killed.stats.get("final", false):
+		_on_victory(killed.stats["name"])
+		return
+	if killed.is_boss():
+		# 보스의 정수(D-022)는 왕국 창고로 들어와 최상위 벽·탑 재료가 된다
+		var essence := {"boss_essence": Balance.BOSS_ESSENCE_PER_BOSS}
+		kingdom.add_resources(essence)
+		_learn(essence)
+		Events.message.emit("보스 %s 처치! 보스의 정수가 왕국 창고에 들어왔습니다" % killed.stats["name"])
 	var xp: int = killed.stats.get("xp", 0)
 	var at := killed.global_position
 	if killed.killed_by == Enemy.SOURCE_TOWER:
@@ -258,7 +337,11 @@ func _on_object_harvested(object_id: int, cell: Vector2i, drops: Dictionary, har
 func grant_harvest(object_id: int, cell: Vector2i, drops: Dictionary) -> void:
 	var at := world.cell_center(cell)
 	Events.resources_gained.emit(drops, at)
-	_give_xp(player, Balance.XP_HARVEST_BY_TIER[world.data.tier_at(cell)], at)
+	var xp: int = Balance.XP_HARVEST_BY_TIER[world.data.tier_at(cell)]
+	_give_xp(player, roundi(xp * (1.0 + player.progression.value("harvest_scholar") / 100.0)), at)
+	var herb := player.progression.value("herbalist")
+	if herb > 0.0 and not player.is_dead:
+		player.heal(herb)
 	var extra := int(player.progression.value("bountiful"))
 	if extra > 0:
 		var bonus := {}
@@ -282,6 +365,13 @@ func passive_value(peer_id: int, id: String) -> float:
 		return player.progression.value(id)
 	var remote := player_sync.remote(peer_id)
 	return PassiveDB.value_in(remote.ranks, id) if remote != null else 0.0
+
+
+## 새벽의 축복: 내 캐릭터는 내 화면에서 회복한다 (참가자도 호스트 시간에 맞춰 아침 신호를 받는다)
+func _on_day_started(_day: int) -> void:
+	var blessing := player.progression.value("dawn_blessing")
+	if blessing > 0.0 and not player.is_dead:
+		player.heal(player.max_hp() * blessing / 100.0)
 
 
 ## 긴급 요새화: 왕국에 배운 사람이 한 명이라도 있으면 가장 높은 단계로 회복한다. 왕국 상태라 호스트만 한다
@@ -318,12 +408,22 @@ func _on_core_destroyed() -> void:
 	show_game_over(summary)
 
 
-func show_game_over(summary: String) -> void:
-	sound_effects.play("core_destroyed")
-	Session.last_result = summary
+## 최종 보스를 쓰러뜨리면 승리 (D-021, 임시). 판정은 적이 있는 호스트만 하고 참가자에게 같은 문장을 보낸다
+func _on_victory(boss_name: String) -> void:
+	var summary := "%d일차에 최종 보스 %s을(를) 쓰러뜨려 왕국을 지켰습니다! 처치한 적 %d마리." % [day_night.day, boss_name, kills]
+	combat_sync.send_game_over(summary, true)
+	show_game_over(summary, true)
+
+
+func show_game_over(summary: String, victory := false) -> void:
+	if victory:
+		Events.ui_sound_requested.emit("level_up")
+	else:
+		sound_effects.play("core_destroyed")
+	Session.last_result = ("승리 · " if victory else "") + summary
 	_close_overlays()
 	get_tree().paused = true
-	hud.game_over_panel.open(summary)
+	hud.game_over_panel.open(summary, victory)
 
 
 func _setup_audio() -> void:
@@ -335,7 +435,7 @@ func _setup_audio() -> void:
 	player.sound_requested.connect(sound_effects.play)
 	Events.day_started.connect(func(_day: int) -> void: sound_effects.play("day_start"))
 	Events.night_started.connect(func(_day: int) -> void: sound_effects.play("night_start"))
-	for panel: Control in [hud.equipment_panel, hud.storage_panel, hud.crafting_panel, hud.passive_panel, hud.build_menu, hud.meeting_panel, hud._big_map]:
+	for panel: Control in [hud.equipment_panel, hud.storage_panel, hud.crafting_panel, hud.teleport_panel, hud.passive_panel, hud.build_menu, hud.meeting_panel, hud._big_map]:
 		sound_effects.watch_panel(panel)
 
 

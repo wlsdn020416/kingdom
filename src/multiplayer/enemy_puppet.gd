@@ -29,6 +29,10 @@ func apply(at: Vector2, hp_ratio: float, frame: int, facing_left: bool, flashing
 	queue_redraw()
 
 
+func hp_ratio() -> float:
+	return _hp_ratio
+
+
 func die() -> void:
 	Fx.burst(get_tree(), global_position, EnemyDB.TYPES[type_id]["color"], 12)
 	queue_free()

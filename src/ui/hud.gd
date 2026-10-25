@@ -51,6 +51,8 @@ var equipment_panel: EquipmentPanel
 var storage_panel: StoragePanel
 var build_menu: BuildMenu
 var crafting_panel: CraftingPanel
+var teleport_panel: TeleportPanel
+var threat_banner := ThreatBanner.new()
 var passive_panel: PassivePanel
 var meeting_panel: MeetingPanel
 var game_over_panel: GameOverPanel
@@ -94,6 +96,11 @@ func setup(main: Main) -> void:
 	crafting_panel = CraftingPanel.new()
 	add_child(crafting_panel)
 	crafting_panel.setup(main.kingdom, main.player, main.kingdom_sync)
+	add_child(threat_banner)
+	threat_banner.setup(main)
+	teleport_panel = TeleportPanel.new()
+	add_child(teleport_panel)
+	teleport_panel.setup(main.kingdom, main.world, main.player, main.map_state)
 	passive_panel = PassivePanel.new()
 	add_child(passive_panel)
 	passive_panel.setup(main.player.progression)
@@ -276,7 +283,8 @@ func _build_messages() -> void:
 	_messages.anchor_right = 0.5
 	_messages.offset_left = -320
 	_messages.offset_right = 320
-	_messages.offset_top = 24
+	# 맨 위 0~56px는 보스 체력바·침공 예고(ThreatBanner, D-023) 자리
+	_messages.offset_top = 60
 	add_child(_messages)
 
 

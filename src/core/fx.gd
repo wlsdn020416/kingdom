@@ -52,6 +52,33 @@ static func float_text(tree: SceneTree, at: Vector2, text: String, color: Color)
 	tween.tween_callback(label.queue_free)
 
 
+## 적이 받은 피해 숫자 (D-023). 강조(패시브로 강해진 공격)는 크고 주황색에 느낌표를 붙인다
+static func damage_number(tree: SceneTree, at: Vector2, amount: float, emphasis: bool) -> void:
+	var parent := tree.get_first_node_in_group("fx_layer")
+	if parent == null:
+		return
+	var label := Label.new()
+	label.text = ("%d!" if emphasis else "%d") % maxi(1, roundi(amount))
+	label.z_index = 101
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.size = Vector2(120, 28)
+	# 같은 자리에 여러 번 맞아도 숫자가 겹치지 않게 살짝 흩뿌린다 (연출용 무작위)
+	label.position = at - Vector2(60, 34) + Vector2(randf_range(-10, 10), randf_range(-4, 4))
+	label.add_theme_font_size_override("font_size", 22 if emphasis else 12)
+	label.add_theme_color_override("font_color", Color("ffb030") if emphasis else Color("f4efe0"))
+	label.add_theme_color_override("font_outline_color", Color.BLACK)
+	label.add_theme_constant_override("outline_size", 6 if emphasis else 4)
+	parent.add_child(label)
+	var tween := label.create_tween()
+	if emphasis:
+		label.pivot_offset = label.size / 2.0
+		label.scale = Vector2.ONE * 1.6
+		tween.tween_property(label, "scale", Vector2.ONE, 0.12)
+	tween.tween_property(label, "position:y", label.position.y - 26.0, 0.7)
+	tween.parallel().tween_property(label, "modulate:a", 0.0, 0.7)
+	tween.tween_callback(label.queue_free)
+
+
 ## 밤에 주변을 밝히는 빛. DayNight가 "lights" 그룹의 밝기를 조절한다.
 static func add_light(owner: Node2D, radius: float) -> PointLight2D:
 	var light := PointLight2D.new()
