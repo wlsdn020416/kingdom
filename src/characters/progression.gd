@@ -1,6 +1,6 @@
 class_name Progression
 extends RefCounted
-## 플레이어 개인의 경험치와 패시브 단계 (D-015).
+## 플레이어 개인의 경험치와 패시브 단계 (D-015, 트리 D-020).
 ## 경험치는 가방 칸을 쓰지 않는다. 죽으면 쓰지 않은 경험치만 사라지고 찍은 패시브는 남는다.
 
 signal changed
@@ -39,12 +39,23 @@ func learn(id: String) -> String:
 	var cost := next_cost(id)
 	if cost < 0:
 		return "이미 최고 단계입니다"
+	var missing := PassiveDB.missing_requirements(id, ranks)
+	if not missing.is_empty():
+		var names := PackedStringArray()
+		for required in missing:
+			names.append(PassiveDB.PASSIVES[required]["name"])
+		return "먼저 배워야 합니다: %s" % ", ".join(names)
 	if xp < cost:
 		return "경험치가 부족합니다 (%d 필요)" % cost
 	xp -= cost
 	ranks[id] = rank(id) + 1
 	changed.emit()
 	return ""
+
+
+## 건물을 지을 때 쓰는 내 건설 패시브 효과 (Kingdom.build의 perks)
+func build_perks() -> Dictionary:
+	return PassiveDB.build_perks(ranks)
 
 
 func lose_unspent() -> void:

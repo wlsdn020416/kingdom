@@ -21,3 +21,13 @@ const TYPES := {
 		"workbench": true, "unique": true,
 	},
 }
+
+
+## 알뜰한 건축 패시브(D-020)로 깎인 비용. 자원마다 반올림하고 최소 1개는 낸다
+static func discounted(cost: Dictionary, discount: float) -> Dictionary:
+	if discount <= 0.0:
+		return cost
+	var result := {}
+	for kind: String in cost:
+		result[kind] = maxi(1, roundi(cost[kind] * (1.0 - discount)))
+	return result

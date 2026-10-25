@@ -2,6 +2,7 @@ class_name Building
 extends StaticBody2D
 ## 플레이어가 지은 건물 (벽, 화살탑, 장비 상자, 제작대). 종류별 수치는 BuildingDB.
 ## 장비 상자 내용(stored)과 제작대 단계(tier)는 Kingdom의 명령 메서드로만 바꾼다.
+## 지은 사람의 건설 패시브(perks, D-020)가 체력·자가 보수·가시·탑 공격 속도를 정한다.
 
 signal destroyed(building: Building)
 
@@ -14,16 +15,25 @@ var type_id := ""
 var info := {}
 var cell := Vector2i.ZERO
 var hp := 1.0
+var max_hp := 1.0
+var regen := 0.0  # 자가 보수: 초당 회복량
+var thorns := 0.0  # 가시 벽: 때린 적에게 돌려주는 피해 비율
+var tower_rate := 1.0  # 탑 훈련: 화살탑 공격 속도 배수
 var stored: Array[String] = []  # 장비 상자에 맡긴 장비 id
 var tier := 0  # 제작대 단계. 부서지면 건물과 함께 사라진다 (D-014)
 var _shot_cooldown := 0.0
 
 
-func setup(id: String, at_cell: Vector2i) -> Building:
+## perks: PassiveDB.build_perks() 결과. 비어 있으면 패시브 없음 (참가자 화면의 건물도 비운 채로 만든다)
+func setup(id: String, at_cell: Vector2i, perks := {}) -> Building:
 	type_id = id
 	info = BuildingDB.TYPES[id]
 	cell = at_cell
-	hp = info["hp"]
+	max_hp = info["hp"] * perks.get("hp_scale", 1.0)
+	hp = max_hp
+	regen = perks.get("regen", 0.0)
+	thorns = perks.get("thorns", 0.0)
+	tower_rate = perks.get("tower_rate", 1.0)
 	return self
 
 
@@ -37,8 +47,7 @@ func _ready() -> void:
 	add_child(collider)
 	if is_tower():
 		Fx.add_light(self, TOWER_LIGHT_RADIUS)
-	else:
-		set_physics_process(false)
+	set_physics_process(is_tower() or regen > 0.0)
 
 
 func is_tower() -> bool:
@@ -53,10 +62,14 @@ func storage_capacity() -> int:
 	return info.get("storage", 0)
 
 
-func take_damage(amount: float) -> void:
+## attacker: 때린 적 (가시 벽이 피해를 돌려준다). 탄·폭발처럼 모르면 null
+func take_damage(amount: float, attacker: Enemy = null) -> void:
 	if hp <= 0.0:
 		return
+	if thorns > 0.0 and attacker != null and is_instance_valid(attacker):
+		attacker.take_damage(amount * thorns, Enemy.SOURCE_TOWER)
 	hp -= amount
+	Events.world_sound_requested.emit("demolish" if hp <= 0.0 else "hit_armor", global_position)
 	queue_redraw()
 	if hp <= 0.0:
 		Fx.burst(get_tree(), global_position, info["color"], 10)
@@ -65,6 +78,10 @@ func take_damage(amount: float) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	if regen > 0.0 and hp < max_hp:
+		heal(regen * delta)
+	if not is_tower():
+		return
 	_shot_cooldown -= delta
 	if _shot_cooldown > 0.0:
 		return
@@ -72,12 +89,17 @@ func _physics_process(delta: float) -> void:
 	var target := _nearest_enemy(tower["range"])
 	if target == null:
 		return
-	_shot_cooldown = tower["interval"]
+	_shot_cooldown = tower["interval"] / tower_rate
 	Projectile.spawn(get_tree(), global_position, {
 		"direction": global_position.direction_to(target.global_position), "speed": tower["speed"],
 		"damage": tower["damage"], "lifetime": 0.6, "radius": 3.0, "color": Color("b0e0ff"),
 		"team": Projectile.Team.TOWER,
 	})
+
+
+func heal(amount: float) -> void:
+	hp = minf(max_hp, hp + amount)
+	queue_redraw()
 
 
 func _nearest_enemy(max_range: float) -> Enemy:
@@ -117,7 +139,6 @@ static func icon_texture(id: String) -> AtlasTexture:
 
 func _draw() -> void:
 	draw_art(self, Vector2.ZERO, type_id, tier)
-	var max_hp: float = info["hp"]
 	if hp < max_hp:
 		var top: float = info["sprite_top"]
 		var bar_y := SPRITE_OFFSET.y + top - HealthBarArt.HEIGHT - 2.0

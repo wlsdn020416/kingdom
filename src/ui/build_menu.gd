@@ -35,8 +35,9 @@ func _refresh() -> void:
 		child.queue_free()
 	for type_id: String in BuildingDB.ORDER:
 		var info: Dictionary = BuildingDB.TYPES[type_id]
-		var cost: Dictionary = info["cost"]
-		var text := "%s   ·   %s   ·   체력 %d" % [info["name"], Balance.format_cost(cost), info["hp"]]
+		var perks := _player.progression.build_perks()
+		var cost := BuildingDB.discounted(info["cost"], perks["discount"])
+		var text := "%s   ·   %s   ·   체력 %d" % [info["name"], Balance.format_cost(cost), roundi(info["hp"] * perks["hp_scale"])]
 		if not _kingdom.can_afford(cost, _player.inventory):
 			text += "   (자원 부족)"
 		var button := UiKit.button(text, choose.bind(type_id))
