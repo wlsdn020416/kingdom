@@ -19,6 +19,7 @@ var _aim := Vector2.RIGHT
 var _sprite := Sprite2D.new()
 var _name_label := Label.new()
 var weapon_visual := WeaponVisual.new()
+var equipment_visual := EquipmentVisual.new()
 
 
 func setup(owner_peer: int, display_name: String, at: Vector2) -> RemotePlayer:
@@ -37,6 +38,8 @@ func _ready() -> void:
 	add_child(weapon_visual)
 	weapon_visual.setup(_sprite)
 	add_child(_sprite)
+	_sprite.add_child(equipment_visual)
+	equipment_visual.setup(_sprite)
 	_name_label.add_theme_font_size_override("font_size", 8)
 	_name_label.add_theme_color_override("font_outline_color", Color.BLACK)
 	_name_label.add_theme_constant_override("outline_size", 3)
@@ -47,11 +50,12 @@ func _ready() -> void:
 	Fx.add_light(self, Player.LIGHT_RADIUS)
 
 
-func apply_state(at: Vector2, aim: Vector2, frame: int, flip: bool, shown: bool, dead: bool, weapon: String = "rusty_sword") -> void:
+func apply_state(at: Vector2, aim: Vector2, frame: int, flip: bool, shown: bool, dead: bool, weapon: String = "rusty_sword", gear: Dictionary = {}) -> void:
 	_target = at
 	_aim = aim
 	weapon_visual.set_weapon(weapon)
 	weapon_visual.aim_direction = aim
+	equipment_visual.set_items(gear)
 	_sprite.frame = frame
 	_sprite.flip_h = flip
 	visible = shown

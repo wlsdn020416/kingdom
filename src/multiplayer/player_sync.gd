@@ -64,7 +64,7 @@ func _physics_process(delta: float) -> void:
 		return
 	_send_timer = SEND_INTERVAL
 	var look := _local.appearance()
-	_state.rpc(_local.global_position, _local.aim_direction, look["frame"], look["flip"], look["shown"], _local.is_dead, look["weapon"])
+	_state.rpc(_local.global_position, _local.aim_direction, look["frame"], look["flip"], look["shown"], _local.is_dead, look["weapon"], look["gear"])
 
 
 ## 패시브를 배우면 단계를 모두에게 알린다. 경험치만 바뀐 경우는 보내지 않는다
@@ -124,10 +124,10 @@ func _begin(members: Dictionary) -> void:
 
 
 @rpc("any_peer", "unreliable_ordered")
-func _state(at: Vector2, aim: Vector2, frame: int, flip: bool, shown: bool, dead: bool, weapon: String) -> void:
+func _state(at: Vector2, aim: Vector2, frame: int, flip: bool, shown: bool, dead: bool, weapon: String, gear: Dictionary = {}) -> void:
 	var remote: RemotePlayer = _remotes.get(multiplayer.get_remote_sender_id())
 	if remote != null:
-		remote.apply_state(at, aim, frame, flip, shown, dead, weapon)
+		remote.apply_state(at, aim, frame, flip, shown, dead, weapon, gear)
 
 
 ## 호스트의 적이 내 캐릭터를 때렸다. 무적·보호막·사망 판정은 내 Player가 한다

@@ -1,13 +1,13 @@
 class_name EquipmentPanel
 extends Control
 ## 부위별 장착과 장비·재료 가방을 보여준다. 상태 변경은 Equipment의 명령을 거친다.
-## 장비 아이콘은 추후 연결하고 현재는 이름을 표시한다.
+## 장비·재료 아이콘은 ItemArtDB의 공용 원본을 사용한다.
 
 enum PanelTone { WINDOW, CARD, TOOLTIP }
 
 const UI_TEXTURE := preload("res://assets/ui/equipment_ui.png")
 const MATERIAL_TEXTURE := preload("res://assets/ui/material_icons.png")
-const MATERIAL_ORDER := ["wood", "stone", "hardwood", "copper", "iron_ore", "moss", "obsidian", "tough_hide", "venom_sting", "ice_crystal", "swamp_ooze", "fire_core"]
+const MATERIAL_ORDER := ItemArtDB.MATERIAL_ORDER
 const SLOT_SIZE := 64
 const BAG_CELL_SIZE := 72
 const GRID_COLUMNS := 6
@@ -280,10 +280,7 @@ func _refresh_materials() -> void:
 			var button := _cell(BAG_CELL_SIZE)
 			button.mouse_default_cursor_shape = Control.CURSOR_HELP
 			var icon := TextureRect.new()
-			var atlas := AtlasTexture.new()
-			atlas.atlas = MATERIAL_TEXTURE
-			atlas.region = Rect2(MATERIAL_ORDER.find(kind) * 24, 0, 24, 24)
-			icon.texture = atlas
+			icon.texture = ItemArtDB.material_icon(kind)
 			icon.position = Vector2(12, 3)
 			icon.size = Vector2(48, 48)
 			icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
@@ -430,8 +427,9 @@ func _set_cell_name(button: Button, text: String, id := "") -> void:
 		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		button.add_child(label)
 	label.text = text
+	label.add_theme_font_size_override("font_size", 10 if button.custom_minimum_size.x <= SLOT_SIZE else 11)
 	var icon := button.get_node_or_null("WeaponIcon") as TextureRect
-	if not WeaponArtDB.WEAPONS.has(id):
+	if not ItemArtDB.ORDER.has(id):
 		if icon != null:
 			icon.hide()
 		label.position.y = 18
@@ -443,7 +441,7 @@ func _set_cell_name(button: Button, text: String, id := "") -> void:
 		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		button.add_child(icon)
-	icon.texture = WeaponVisual.icon(id)
+	icon.texture = ItemArtDB.icon(id)
 	icon.size = WEAPON_ICON_SIZE
 	icon.position = Vector2((button.custom_minimum_size.x - icon.size.x) / 2.0, WEAPON_ICON_TOP)
 	icon.show()

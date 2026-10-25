@@ -55,8 +55,14 @@ func _add_column(parent: Control, title: String) -> VBoxContainer:
 	var column := VBoxContainer.new()
 	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	column.add_child(UiKit.note(title))
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(270, 320)
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	column.add_child(scroll)
 	var list := VBoxContainer.new()
-	column.add_child(list)
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(list)
 	parent.add_child(column)
 	return list
 
@@ -86,11 +92,20 @@ func _refresh() -> void:
 	if _player.equipment.bag.is_empty():
 		_bag.add_child(UiKit.note("가방이 비어 있습니다."))
 	for id in _player.equipment.bag:
-		_bag.add_child(UiKit.button(_describe(id), _move.bind(id, true)))
+		_bag.add_child(_item_button(id, true))
 	if building.stored.is_empty():
 		_stored.add_child(UiKit.note("맡긴 장비가 없습니다."))
 	for id in building.stored:
-		_stored.add_child(UiKit.button(_describe(id), _move.bind(id, false)))
+		_stored.add_child(_item_button(id, false))
+
+
+func _item_button(id: String, to_storage: bool) -> Button:
+	var item: Dictionary = ItemDB.ITEMS[id]
+	var button := UiKit.button("%s\n%s" % [item["name"], ItemDB.SLOT_NAMES[item["slot"]]], _move.bind(id, to_storage))
+	button.tooltip_text = _describe(id)
+	button.icon = ItemArtDB.icon(id)
+	button.add_theme_constant_override("h_separation", 10)
+	return button
 
 
 func _describe(id: String) -> String:

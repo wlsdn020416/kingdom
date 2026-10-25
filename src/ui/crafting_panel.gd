@@ -93,6 +93,8 @@ func _refresh() -> void:
 		var recipe: Dictionary = RecipeDB.RECIPES[id]
 		var text := "%s   ·   %s\n%s" % [ItemDB.ITEMS[id]["name"], Balance.format_cost(recipe["cost"]), ItemDB.describe(id)]
 		var button := UiKit.button(text, _on_craft.bind(id))
+		button.icon = ItemArtDB.icon(id)
+		button.add_theme_constant_override("h_separation", 10)
 		if tier < recipe["tier"]:
 			button.text = "[%d단계 필요] " % recipe["tier"] + text
 			button.disabled = true
