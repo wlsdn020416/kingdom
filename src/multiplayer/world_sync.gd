@@ -48,9 +48,15 @@ func _on_object_changed(cell: Vector2i, hp: float) -> void:
 
 # --- 호스트가 부르는 것 ---
 
-func send_harvest(peer_id: int, object_id: int, cell: Vector2i, drops: Dictionary) -> void:
+func send_harvest(peer_id: int, object_id: int, cell: Vector2i, drops: Dictionary, xp: int) -> void:
 	if _net.is_online():
-		_harvest.rpc_id(peer_id, object_id, cell, drops)
+		_harvest.rpc_id(peer_id, object_id, cell, drops, xp)
+
+
+## 아침 재생으로 자란 [칸, 오브젝트] 목록 (D-035)
+func send_regrowth(grown: Array) -> void:
+	if _net.is_online() and not grown.is_empty():
+		_regrown.rpc(grown)
 
 
 func send_chest(peer_id: int, reward: Dictionary, at: Vector2) -> void:
@@ -72,8 +78,13 @@ func _object_state(cell: Vector2i, hp: float) -> void:
 
 
 @rpc("authority", "reliable")
-func _harvest(object_id: int, cell: Vector2i, drops: Dictionary) -> void:
-	_main.grant_harvest(object_id, cell, drops)
+func _regrown(grown: Array) -> void:
+	_main.world.apply_grown(grown)
+
+
+@rpc("authority", "reliable")
+func _harvest(object_id: int, cell: Vector2i, drops: Dictionary, xp: int) -> void:
+	_main.grant_harvest(object_id, cell, drops, xp)
 
 
 @rpc("authority", "reliable")

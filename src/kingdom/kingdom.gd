@@ -1,6 +1,7 @@
 class_name Kingdom
 extends Node2D
-## 왕국 운영: 공용 자원(창고), 건물, 장비 상자, 제작대, 핵 수리.
+## 왕국 운영: 공용 자원(창고), 건물, 장비 상자, 제작대, 핵 수리, 방어 단계·영토 확장 (D-027).
+## 왕국 핵 창의 명령(제작대 강화·방어 단계·영토 확장·수리)은 핵 근처에서만 된다.
 ## 비용은 지불하는 플레이어의 개인 인벤토리에서 먼저, 모자라면 공용 창고에서 낸다 (D-014).
 ## 멀티플레이에서는 호스트의 Kingdom만 명령 메서드로 바뀌고, 참가자는 apply_snapshot()으로 같은 상태를 받는다 (D-017 3단계).
 
@@ -11,6 +12,12 @@ var stock: Dictionary = Balance.START_STOCK.duplicate()
 var buildings := {}  # Vector2i -> Building
 ## 왕국 사람 누구든 한 번이라도 얻어 본 재료. 레시피 공개 조건 (D-014)
 var known_materials := {}  # 자원 id -> true
+var defense_tier := 0  # 벽·공성탑·생활 건물을 여는 단계 (BuildingDB "tier", D-027)
+var territory_level := 0  # 영토 확장 횟수
+
+
+func _ready() -> void:
+	add_to_group("kingdom")
 
 
 func setup(target_world: World) -> void:
@@ -26,8 +33,23 @@ func core_cell() -> Vector2i:
 	return world.data.core_cell
 
 
+## 지금 영토 반지름 (칸)
+func territory_radius() -> int:
+	return Balance.TERRITORY_RADIUS + territory_level * Balance.TERRITORY_STEP
+
+
 func in_territory(cell: Vector2i) -> bool:
-	return Vector2(cell - core_cell()).length() <= Balance.TERRITORY_RADIUS
+	return Vector2(cell - core_cell()).length() <= territory_radius()
+
+
+## 그 위치가 지도에 그린 영토 경계 안인가 (적의 낮 영토 판단, D-026)
+func in_territory_at(at: Vector2) -> bool:
+	return at.distance_to(core.global_position) <= territory_edge()
+
+
+## 영토 경계까지의 거리 (px). 칸 판정(in_territory)과 맞추려고 반 칸 더한다
+func territory_edge() -> float:
+	return (territory_radius() + 0.5) * Balance.TILE
 
 
 func is_core_cell(cell: Vector2i) -> bool:
@@ -72,11 +94,11 @@ func can_deposit_at(carrier_position: Vector2) -> bool:
 	return false
 
 
-## 짓는 데 필요한 제작대 단계·영토 조건. 지을 수 있으면 "" (건설 메뉴의 잠금 표시와 build()가 같이 쓴다)
+## 짓는 데 필요한 방어 단계. 지을 수 있으면 "" (건설 메뉴의 잠금 표시와 build()가 같이 쓴다)
 func tech_error(type_id: String) -> String:
 	var tier: int = BuildingDB.TYPES[type_id].get("tier", 0)
-	if tier > 0 and workbench_tier() < tier:
-		return "제작대 %d단계가 필요합니다" % tier
+	if defense_tier < tier:
+		return "방어 %d단계가 필요합니다 (왕국 핵에서 강화)" % tier
 	return ""
 
 
@@ -192,11 +214,21 @@ func discover(amounts: Dictionary) -> Array[String]:
 	return revealed
 
 
-## 성공하면 "", 실패하면 이유를 돌려준다
+## 왕국 핵 창 명령이 되는 위치인가. 되면 ""
+func core_use_error(actor_position: Vector2) -> String:
+	if actor_position.distance_to(core.global_position) > Balance.CORE_USE_RANGE:
+		return "왕국 핵 근처에서만 할 수 있습니다"
+	return ""
+
+
+## 왕국 핵 창에서 제작대 단계를 올린다 (D-027). 성공하면 "", 실패하면 이유를 돌려준다
 func upgrade_workbench(actor_position: Vector2, payer: Inventory = null) -> String:
-	var cell := find_workbench_near(actor_position)
+	var near := core_use_error(actor_position)
+	if near != "":
+		return near
+	var cell := _find_type("workbench")
 	if cell == World.NO_CELL:
-		return "제작대 근처에서만 할 수 있습니다"
+		return "먼저 제작대를 지어야 합니다"
 	var building: Building = buildings[cell]
 	if building.tier >= RecipeDB.max_tier():
 		return "제작대가 이미 최고 단계입니다"
@@ -210,7 +242,41 @@ func upgrade_workbench(actor_position: Vector2, payer: Inventory = null) -> Stri
 	return ""
 
 
-## 장비를 만들어 equipment 가방에 넣는다. 성공하면 "", 실패하면 이유를 돌려준다. crafter = 경험치를 받을 peer id
+## 방어 단계를 올려 더 단단한 벽·공성탑을 연다 (D-027). 성공하면 "", 실패하면 이유를 돌려준다
+func upgrade_defense(actor_position: Vector2, payer: Inventory = null) -> String:
+	var near := core_use_error(actor_position)
+	if near != "":
+		return near
+	if defense_tier >= BuildingDB.max_defense_tier():
+		return "방어 단계가 이미 최고입니다"
+	var cost: Dictionary = BuildingDB.DEFENSE_UPGRADES[defense_tier]
+	if not can_afford(cost, payer):
+		return "방어 강화에는 %s 이(가) 필요합니다" % Balance.format_cost(cost)
+	_spend(cost, payer)
+	defense_tier += 1
+	Events.world_sound_requested.emit("upgrade", core.global_position)
+	return ""
+
+
+## 영토를 Balance.TERRITORY_STEP칸 넓힌다 (D-027). 성공하면 "", 실패하면 이유를 돌려준다
+func expand_territory(actor_position: Vector2, payer: Inventory = null) -> String:
+	var near := core_use_error(actor_position)
+	if near != "":
+		return near
+	if territory_level >= Balance.TERRITORY_UPGRADES.size():
+		return "영토를 더 넓힐 수 없습니다"
+	var cost: Dictionary = Balance.TERRITORY_UPGRADES[territory_level]
+	if not can_afford(cost, payer):
+		return "영토 확장에는 %s 이(가) 필요합니다" % Balance.format_cost(cost)
+	_spend(cost, payer)
+	territory_level += 1
+	queue_redraw()
+	Events.world_sound_requested.emit("upgrade", core.global_position)
+	return ""
+
+
+## 장비를 만들어 equipment 가방에 넣는다. 무기 강화 레시피("from")는 이전 무기를 새 무기로 바꾼다.
+## 성공하면 "", 실패하면 이유를 돌려준다. crafter = 경험치를 받을 peer id
 func craft(recipe_id: String, actor_position: Vector2, payer: Inventory, equipment: Equipment, crafter := Enemy.SOURCE_LOCAL) -> String:
 	var cell := find_workbench_near(actor_position)
 	if cell == World.NO_CELL:
@@ -220,10 +286,17 @@ func craft(recipe_id: String, actor_position: Vector2, payer: Inventory, equipme
 	var recipe: Dictionary = RecipeDB.RECIPES[recipe_id]
 	if buildings[cell].tier < recipe["tier"]:
 		return "제작대 %d단계가 필요합니다" % recipe["tier"]
+	var from: String = recipe.get("from", "")
+	if from != "" and not equipment.owns(from):
+		return "강화할 %s이(가) 있어야 합니다" % ItemDB.ITEMS[from]["name"]
 	if not can_afford(recipe["cost"], payer):
 		return "자원이 부족합니다 (%s)" % Balance.format_cost(recipe["cost"])
 	_spend(recipe["cost"], payer)
-	equipment.add_to_bag(recipe_id)
+	# 강화는 이전 무기를 소모해서 그 자리를 새 무기로 바꾼다 (D-028)
+	if from != "":
+		equipment.replace_item(from, recipe_id)
+	else:
+		equipment.add_to_bag(recipe_id)
 	Events.world_sound_requested.emit("craft", world.cell_center(cell))
 	Events.item_crafted.emit(recipe_id, crafter)
 	return ""
@@ -290,7 +363,7 @@ func _check_storage(cell: Vector2i, actor_position: Vector2) -> String:
 ## perks: 수리하는 사람의 패시브(PassiveDB.repair_perks). 수리량(보수 전문가)·비용 할인(자재 절약)·영토 건물 회복(핵 공명)
 func repair(repairer_position: Vector2, payer: Inventory = null, perks := {}) -> String:
 	var cost := BuildingDB.discounted(Balance.REPAIR_COST, perks.get("discount", 0.0))
-	if repairer_position.distance_to(core.global_position) > Balance.REPAIR_RANGE:
+	if core_use_error(repairer_position) != "":
 		return "왕국 핵 근처에서만 수리할 수 있습니다"
 	if core.hp >= core.max_hp:
 		return "왕국이 멀쩡합니다"
@@ -329,12 +402,17 @@ func snapshot() -> Dictionary:
 	for cell: Vector2i in buildings:
 		var building: Building = buildings[cell]
 		list.append([cell, building.type_id, building.hp, building.tier, building.stored.duplicate(), building.max_hp])
-	return {"stock": stock.duplicate(), "known": known_materials.duplicate(), "buildings": list}
+	return {"stock": stock.duplicate(), "known": known_materials.duplicate(), "buildings": list,
+		"defense": defense_tier, "territory": territory_level}
 
 
 ## 참가자: 호스트의 상태를 그대로 따른다. 건물은 비용 없이 만들거나 없앤다. known은 KingdomSync가 discover()로 반영한다
 func apply_snapshot(state: Dictionary) -> void:
 	stock = state["stock"]
+	defense_tier = state["defense"]
+	if territory_level != state["territory"]:
+		territory_level = state["territory"]
+		queue_redraw()
 	var seen := {}
 	var changed: Array[Vector2i] = []
 	for entry: Array in state["buildings"]:
@@ -386,7 +464,7 @@ func _on_building_destroyed(building: Building) -> void:
 func _draw() -> void:
 	if world == null:
 		return
-	var radius := (Balance.TERRITORY_RADIUS + 0.5) * Balance.TILE
+	var radius := territory_edge()
 	var segments := 72
 	for i in range(0, segments, 2):
 		draw_arc(core.position, radius, TAU * i / segments, TAU * (i + 1) / segments, 4, Palette.TERRITORY, 2.0)

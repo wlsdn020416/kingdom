@@ -1,11 +1,18 @@
 class_name Enemy
 extends CharacterBody2D
 ## 적. 침공(invader) 적은 왕국 핵으로 가면서 길을 막는 벽·나무를 부순다.
-## 낮에 돌아다니는 적은 플레이어가 가까이 오면 쫓아온다. 멀티플레이에서는 호스트에만 있고(D-017)
+## 낮에 돌아다니는 적은 플레이어가 가까이 오면 쫓아온다. 낮에는 왕국 영토에 들어오지 않고 영토 안의 플레이어는 노리지 않는다(D-026).
+## 멀티플레이에서는 호스트에만 있고(D-017)
 ## 대상은 "player" 그룹(로컬 Player와 다른 사람의 RemotePlayer) 중 가장 가까운 살아 있는 플레이어다.
 ## 보스는 EnemyDB의 "patterns"를 반복하고 체력이 줄면 "rage"로 빨라진다 (D-021). 패턴에는 무작위가 없다.
 
 const SPRITE_TEXTURE := preload("res://assets/enemies/enemies.png")
+const BOSS_TEXTURE := preload("res://assets/enemies/bosses.png")
+const BOSS_SPRITE_SIZE := 128
+const BOSS_SPRITE_OFFSET := Vector2(-64, -104)
+const BOSS_ANIMATION_FRAMES := 8
+const BOSS_RAGE_ANIMATION_LIMIT := 1.5
+const BOSS_RAGE_GLOW := 0.12
 const SPRITE_SIZE := 64
 const SPRITE_OFFSET := Vector2(-32, -40)
 const ANIMATION_FRAMES := 4
@@ -32,9 +39,15 @@ var minion_damage_scale := 1.0
 var net_id := 0
 ## 마지막 일격을 준 쪽 (SOURCE_TOWER 또는 peer id). 처치 보상을 누구에게 줄지 정한다
 var killed_by := SOURCE_LOCAL
+## 낮의 배회 적: 영토 밖에 머물고 영토 안의 플레이어를 무시한다 (D-026). WaveSpawner가 낮/밤에 맞춰 정한다
+var avoids_kingdom := false
+## 바이옴 서식 몬스터(D-035)의 집과 바이옴. 집이 있으면 사라지지 않고 집 근처를 돌아다닌다. INF·-1이면 서식지 없음
+var home := Vector2.INF
+var home_terrain := -1
 
 var _target: Node2D  # 이번 프레임에 노리는 플레이어 (Player 또는 RemotePlayer)
 var _core: Core
+var _kingdom: Kingdom
 var _world: World
 var _attack_cooldown := 0.0
 var _pattern_timers: Array[float] = []
@@ -87,7 +100,7 @@ func _ready() -> void:
 	add_to_group("enemies")
 	motion_mode = MOTION_MODE_FLOATING
 	collision_layer = PhysicsLayers.ENEMIES
-	collision_mask = PhysicsLayers.WATER | PhysicsLayers.OBJECTS | PhysicsLayers.BUILDINGS
+	collision_mask = PhysicsLayers.WATER | PhysicsLayers.OBJECTS | PhysicsLayers.BUILDINGS | PhysicsLayers.PASSABLE
 	var shape := CircleShape2D.new()
 	shape.radius = radius
 	var collider := CollisionShape2D.new()
@@ -96,6 +109,7 @@ func _ready() -> void:
 	net_id = _next_net_id
 	_next_net_id += 1
 	_core = get_tree().get_first_node_in_group("core")
+	_kingdom = get_tree().get_first_node_in_group("kingdom")
 	_world = get_tree().get_first_node_in_group("world")
 	_wander_direction = Vector2.from_angle(randf() * TAU)
 
@@ -103,15 +117,22 @@ func _ready() -> void:
 func _physics_process(delta: float) -> void:
 	_attack_cooldown -= delta
 	_flash -= delta
-	_target = _nearest_player()
+	var nearest := _nearest_player(false)
+	_target = _nearest_player(avoids_kingdom)
 	var chasing_player := _player_in_aggro()
+	# 서식 몬스터는 집에서 너무 멀리까지는 쫓아가지 않는다
+	if chasing_player and home.is_finite() and global_position.distance_to(home) > Balance.RESIDENT_CHASE_LIMIT:
+		chasing_player = false
 	var target: Vector2
 	if chasing_player:
 		target = _target.global_position
 	elif is_invader:
 		target = _core.global_position
+	elif home.is_finite() and global_position.distance_to(home) > Balance.RESIDENT_LEASH:
+		target = home
 	else:
-		if _target == null or global_position.distance_to(_target.global_position) > Balance.WANDERER_DESPAWN_DISTANCE:
+		# 서식지 없는 배회 적만: 사라질지는 영토 안 사람까지 포함한 가장 가까운 플레이어로 정한다
+		if not home.is_finite() and (nearest == null or global_position.distance_to(nearest.global_position) > Balance.WANDERER_DESPAWN_DISTANCE):
 			queue_free()
 			return
 		if randf() < delta * 0.5:
@@ -127,6 +148,8 @@ func _physics_process(delta: float) -> void:
 	elif _charge_left > 0.0:
 		velocity = _charge_direction * float(_charge["speed"])
 	_knockback = _knockback.move_toward(Vector2.ZERO, 1200.0 * delta)
+	if avoids_kingdom:
+		_stay_out_of_kingdom()
 	move_and_slide()
 	_update_animation(delta)
 
@@ -144,7 +167,7 @@ func take_damage(amount: float, source := SOURCE_LOCAL, emphasis := false) -> vo
 	if _dying:
 		return
 	hp -= amount
-	Events.damage_dealt.emit(global_position, amount, emphasis)
+	Events.damage_dealt.emit(global_position, amount, emphasis, source)
 	Events.world_sound_requested.emit("enemy_death" if hp <= 0.0 else "hit_flesh", global_position)
 	_flash = 0.08
 	if hp <= 0.0:
@@ -189,17 +212,39 @@ func appearance() -> Array:
 	return [net_id, type_id, global_position, hp / max_hp, _animation_frame, _facing_left, _flash > 0.0]
 
 
-func _nearest_player() -> Node2D:
+## skip_kingdom: 영토 안의 플레이어는 없는 셈 친다 (낮의 배회 적)
+func _nearest_player(skip_kingdom: bool) -> Node2D:
 	var best: Node2D = null
 	var best_distance := INF
 	for candidate: Node2D in get_tree().get_nodes_in_group("player"):
-		if candidate.is_dead:
+		if candidate.is_dead or (skip_kingdom and in_kingdom(candidate.global_position)):
 			continue
 		var distance := global_position.distance_to(candidate.global_position)
 		if distance < best_distance:
 			best = candidate
 			best_distance = distance
 	return best
+
+
+## 그 위치가 왕국 영토(지도에 그린 경계, 영토 확장으로 넓어짐) 안인가
+func in_kingdom(at: Vector2) -> bool:
+	return _kingdom != null and _kingdom.in_territory_at(at)
+
+
+## 영토 안이면 바깥으로 밀어내고, 경계 근처에서 안쪽으로 향하는 속도는 지워 경계를 따라 미끄러지게 한다
+func _stay_out_of_kingdom() -> void:
+	if _kingdom == null:
+		return
+	var from_core := global_position - _kingdom.core.global_position
+	var outward := from_core.normalized() if from_core != Vector2.ZERO else Vector2.RIGHT
+	var edge := _kingdom.territory_edge() + radius
+	var inward := velocity.dot(outward)
+	if from_core.length() < edge:
+		velocity = outward * maxf(velocity.length(), float(stats["speed"]))
+		_wander_direction = outward
+	elif inward < 0.0 and from_core.length() < edge + Balance.TILE:
+		velocity -= outward * inward
+		_wander_direction = outward
 
 
 func _player_in_aggro() -> bool:
@@ -337,27 +382,53 @@ func _update_animation(delta: float) -> void:
 	if absf(velocity.x) > 1.0:
 		_facing_left = velocity.x < 0.0
 	if velocity.length() > 1.0 or type_id in IDLE_ANIMATED or is_boss():
-		_animation_time += delta
+		_animation_time += delta * (minf(_rage("rate"), BOSS_RAGE_ANIMATION_LIMIT) if is_boss() else 1.0)
 	else:
 		_animation_time = 0.0
-	_animation_frame = int(_animation_time * ANIMATION_FPS) % ANIMATION_FRAMES
+	_animation_frame = int(_animation_time * ANIMATION_FPS) % animation_frames(type_id)
 
 
 func _draw() -> void:
 	draw_body(self, type_id, _animation_frame, _facing_left, _flash > 0.0, hp / max_hp, radius)
 
 
-## 참가자 화면의 EnemyPuppet도 같은 그림을 쓴다
+## 일반 적과 보스는 크기가 다르지만 같은 위치·프레임 계약으로 로컬/원격에서 그린다.
+static func animation_frames(id: String) -> int:
+	return BOSS_ANIMATION_FRAMES if EnemyDB.TYPES[id].get("is_boss", false) else ANIMATION_FRAMES
+
+
+static func sprite_texture(id: String) -> Texture2D:
+	return BOSS_TEXTURE if EnemyDB.TYPES[id].get("is_boss", false) else SPRITE_TEXTURE
+
+
+static func sprite_offset(id: String) -> Vector2:
+	return BOSS_SPRITE_OFFSET if EnemyDB.TYPES[id].get("is_boss", false) else SPRITE_OFFSET
+
+
+static func sprite_region(id: String, frame: int) -> Rect2:
+	var info: Dictionary = EnemyDB.TYPES[id]
+	var pixels := BOSS_SPRITE_SIZE if info.get("is_boss", false) else SPRITE_SIZE
+	var row: int = info["sprite_row"]
+	return Rect2(Vector2(posmod(frame, animation_frames(id)) * pixels, row * pixels), Vector2.ONE * pixels)
+
+
+## 참가자 화면의 EnemyPuppet도 동일한 고유 외형·호흡·피격·분노 표시를 쓴다.
 static func draw_body(canvas: CanvasItem, id: String, frame: int, facing_left: bool, flashing: bool, hp_ratio: float, body_radius: float) -> void:
 	var info: Dictionary = EnemyDB.TYPES[id]
-	var row: int = info["sprite_row"]
-	var region := Rect2(Vector2(frame * SPRITE_SIZE, row * SPRITE_SIZE), Vector2.ONE * SPRITE_SIZE)
-	var tint: Color = Color(2.4, 2.4, 2.4) if flashing else info.get("tint", Color.WHITE)
+	var region := sprite_region(id, frame)
+	var offset := sprite_offset(id)
+	var tint := Color(2.4, 2.4, 2.4) if flashing else Color.WHITE
+	# 분노는 기존 체력 조건을 읽는 연출이다. 서리·늪의 고유색이 사라지지 않게 밝기만 살짝 올린다.
+	if not flashing and info.get("is_boss", false):
+		var phases: Array = info.get("rage", [])
+		if not phases.is_empty() and hp_ratio <= float(phases[0]["at"]):
+			var pulse := 1.0 + BOSS_RAGE_GLOW * (0.5 + 0.5 * sin(frame * TAU / BOSS_ANIMATION_FRAMES))
+			tint = Color(pulse, pulse, pulse)
 	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2(-1 if facing_left else 1, 1))
-	canvas.draw_texture_rect_region(SPRITE_TEXTURE, Rect2(SPRITE_OFFSET, Vector2.ONE * SPRITE_SIZE), region, tint)
+	canvas.draw_texture_rect_region(sprite_texture(id), Rect2(offset, region.size), region, tint)
 	canvas.draw_set_transform(Vector2.ZERO)
 	if hp_ratio < 1.0:
 		var width := maxi(HealthBarArt.WIDTH, roundi(body_radius * 2.0 + 8.0))
 		var sprite_top: int = info["sprite_top"]
-		var bar_y := minf(-body_radius - 12.0, sprite_top + SPRITE_OFFSET.y - HealthBarArt.HEIGHT - 2.0)
+		var bar_y := minf(-body_radius - 12.0, sprite_top + offset.y - HealthBarArt.HEIGHT - 2.0)
 		HealthBarArt.draw_bar(canvas, Vector2(-width / 2.0, bar_y), hp_ratio, HealthBarArt.Tone.RED, width)

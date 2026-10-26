@@ -26,6 +26,8 @@ var core_cell: Vector2i
 var terrain := PackedByteArray()
 var objects := PackedByteArray()
 var object_hp := PackedFloat32Array()
+## 바이옴·종류별 나무·바위·광석 목표 수 (Vector2i(지형, 오브젝트) -> 개수). 시드로 정해져 모두가 같다 (D-035)
+var resource_targets := {}
 var explored := PackedByteArray()
 
 

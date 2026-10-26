@@ -33,7 +33,7 @@ func _process(delta: float) -> void:
 	var dark := darkness()
 	_darkness_node.color = DAY_COLOR.lerp(NIGHT_COLOR, dark)
 	for light: PointLight2D in get_tree().get_nodes_in_group("lights"):
-		light.energy = dark * LIGHT_ENERGY
+		light.energy = dark * LIGHT_ENERGY * float(light.get_meta(Fx.LIGHT_ENERGY_META, 1.0))
 
 
 func is_night() -> bool:

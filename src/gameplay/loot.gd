@@ -17,6 +17,11 @@ const BIOME_RESOURCES := {
 }
 
 
+## 상자에서 나올 수 있는 장비. 강화로만 얻는 무기(RecipeDB "from")는 나오지 않는다 (D-028, 임시)
+static func chest_items() -> Array:
+	return ItemDB.ITEMS.keys().filter(func(id: String) -> bool: return not RecipeDB.RECIPES.get(id, {}).has("from"))
+
+
 ## {"resources": {...}} 에 낮은 확률로 "item": id 가 더해진다. item_bonus: 보물 사냥꾼 패시브 (0.1 = +10%p)
 static func roll_chest(terrain: int, rng: RandomNumberGenerator, item_bonus := 0.0) -> Dictionary:
 	var table: Dictionary = BIOME_RESOURCES.get(terrain, BIOME_RESOURCES[WorldData.Terrain.GRASS])
@@ -26,6 +31,6 @@ static func roll_chest(terrain: int, rng: RandomNumberGenerator, item_bonus := 0
 		resources[kind] = rng.randi_range(range_[0], range_[1])
 	var reward := {"resources": resources}
 	if rng.randf() < ITEM_CHANCE + item_bonus:
-		var ids := ItemDB.ITEMS.keys()
+		var ids := chest_items()
 		reward["item"] = ids[rng.randi_range(0, ids.size() - 1)]
 	return reward

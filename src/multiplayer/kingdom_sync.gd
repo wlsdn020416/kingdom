@@ -1,6 +1,6 @@
 class_name KingdomSync
 extends Node
-## 왕국 동기화 (D-017 3단계). 창고·건물·장비 상자·제작대 단계·알게 된 재료는 호스트의 Kingdom만 바꾼다.
+## 왕국 동기화 (D-017 3단계). 창고·건물·장비 상자·제작대 단계·방어 단계·영토·알게 된 재료는 호스트의 Kingdom만 바꾼다.
 ## 입력·UI는 Kingdom 명령 메서드 대신 이 노드의 같은 이름 메서드를 부른다. 혼자 플레이·호스트는 바로 Kingdom을 부르고,
 ## 참가자는 호스트에 요청한다. 호스트는 같은 명령 메서드로 검증·적용하고 결과를 돌려준다.
 ## 개인 가방·장비 가방은 아직 각자 가지고 있어서, 참가자는 요청에 가방 내용을 실어 보내고 호스트가 뺄 양을 정해 준다 (임시).
@@ -88,6 +88,10 @@ func take_item(cell: Vector2i, id: String) -> void:
 
 func craft(recipe_id: String) -> void:
 	if _is_client():
+		var from: String = RecipeDB.RECIPES.get(recipe_id, {}).get("from", "")
+		if from != "" and not _player.equipment.owns(from):
+			_report("강화할 %s이(가) 있어야 합니다" % ItemDB.ITEMS[from]["name"])
+			return
 		_request_craft.rpc_id(1, recipe_id, _player.inventory.amounts())
 		return
 	var error := _kingdom.craft(recipe_id, _player.global_position, _player.inventory, _player.equipment)
@@ -100,6 +104,20 @@ func upgrade_workbench() -> void:
 		return
 	var error := _kingdom.upgrade_workbench(_player.global_position, _player.inventory)
 	_report(error, _upgrade_note())
+
+
+func upgrade_defense() -> void:
+	if _is_client():
+		_request_defense.rpc_id(1, _player.inventory.amounts())
+		return
+	_report(_kingdom.upgrade_defense(_player.global_position, _player.inventory), _defense_note())
+
+
+func expand_territory() -> void:
+	if _is_client():
+		_request_territory.rpc_id(1, _player.inventory.amounts())
+		return
+	_report(_kingdom.expand_territory(_player.global_position, _player.inventory), _territory_note())
 
 
 func repair() -> void:
@@ -129,11 +147,21 @@ func _report(error: String, note := "") -> void:
 
 
 func _craft_note(recipe_id: String) -> String:
+	if RecipeDB.RECIPES[recipe_id].has("from"):
+		return "%s(으)로 강화!" % ItemDB.ITEMS[recipe_id]["name"]
 	return "%s 제작! (I로 착용)" % ItemDB.ITEMS[recipe_id]["name"]
 
 
 func _upgrade_note() -> String:
 	return "제작대가 %d단계가 되었습니다" % _kingdom.workbench_tier()
+
+
+func _defense_note() -> String:
+	return "방어 %d단계! 새 벽·공성탑을 지을 수 있습니다 (B)" % _kingdom.defense_tier
+
+
+func _territory_note() -> String:
+	return "영토가 %d칸으로 넓어졌습니다" % _kingdom.territory_radius()
 
 
 # --- 호스트: 참가자 요청 처리 ---
@@ -224,9 +252,14 @@ func _request_craft(recipe_id: String, held: Dictionary) -> void:
 	if actor == null:
 		return
 	var payer := _claimed(held)
-	var error := _kingdom.craft(recipe_id, actor.global_position, payer, Equipment.new(), actor.peer_id)
-	_reply(error, _craft_note(recipe_id) if error == "" else "", _spent(held, payer), [],
-		[recipe_id] if error == "" else [])
+	# 장비 가방은 참가자가 가진다(임시). 강화 레시피면 참가자가 이전 무기를 가졌다고 믿고 그 자리를 바꾸게 한다 (D-028)
+	var bag := Equipment.new()
+	var from: String = RecipeDB.RECIPES.get(recipe_id, {}).get("from", "")
+	if from != "":
+		bag.add_to_bag(from)
+	var error := _kingdom.craft(recipe_id, actor.global_position, payer, bag, actor.peer_id)
+	_reply(error, _craft_note(recipe_id) if error == "" else "", _spent(held, payer),
+		[from] if error == "" and from != "" else [], [recipe_id] if error == "" else [])
 
 
 @rpc("any_peer", "reliable")
@@ -237,6 +270,26 @@ func _request_upgrade(held: Dictionary) -> void:
 	var payer := _claimed(held)
 	var error := _kingdom.upgrade_workbench(actor.global_position, payer)
 	_reply(error, _upgrade_note() if error == "" else "", _spent(held, payer))
+
+
+@rpc("any_peer", "reliable")
+func _request_defense(held: Dictionary) -> void:
+	var actor := _requester()
+	if actor == null:
+		return
+	var payer := _claimed(held)
+	var error := _kingdom.upgrade_defense(actor.global_position, payer)
+	_reply(error, _defense_note() if error == "" else "", _spent(held, payer))
+
+
+@rpc("any_peer", "reliable")
+func _request_territory(held: Dictionary) -> void:
+	var actor := _requester()
+	if actor == null:
+		return
+	var payer := _claimed(held)
+	var error := _kingdom.expand_territory(actor.global_position, payer)
+	_reply(error, _territory_note() if error == "" else "", _spent(held, payer))
 
 
 @rpc("any_peer", "reliable")
@@ -263,6 +316,11 @@ func _request_deposit(held: Dictionary) -> void:
 func _result(error: String, note: String, taken: Dictionary, removed: Array, added: Array) -> void:
 	for kind: String in taken:
 		_player.inventory.take(kind, taken[kind])
+	# 무기 강화: 이전 무기 하나가 빠지고 새 무기 하나가 그 자리에 들어온다 (들고 있었으면 손에 그대로)
+	if removed.size() == 1 and added.size() == 1:
+		_player.equipment.replace_item(removed[0], added[0])
+		_report(error, note)
+		return
 	for id: String in removed:
 		_player.equipment.remove_from_bag(id)
 	for id: String in added:

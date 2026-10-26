@@ -9,15 +9,17 @@ const MOISTURE_FREQUENCY := 1.0 / 36.0
 const RING_FREQUENCY := 1.0 / 20.0
 const WATER_LEVEL := 0.40
 const BEACH_LEVEL := 0.43
-## 단계 경계(핵에서 칸 거리). [0→1, 1→2, 2→3]
-const RING_EDGES := [34.0, 54.0, 73.0]
-const RING_WOBBLE := 6.0  # 경계를 노이즈로 이만큼(칸) 흔들어 원 모양이 드러나지 않게 한다
+## 단계 경계(핵에서 칸 거리). [0→1, 1→2, 2→3]. 바이옴이 너무 작다는 사용자 요청으로 넓혔다 (D-032)
+const RING_EDGES := [40.0, 72.0, 104.0]
+const RING_WOBBLE := 8.0  # 경계를 노이즈로 이만큼(칸) 흔들어 원 모양이 드러나지 않게 한다
 const WET_LEVEL := 0.5  # 같은 단계 안에서 이보다 습하면 숲·늪, 아니면 사막·설원
 const CENTER_LIFT := 0.15  # 중앙을 높여서 왕국 주변이 육지가 되게 한다
-const COAST_START := 0.7  # 중심에서 이 비율보다 멀어지면 점점 바다가 된다 (월드 경계)
-const COAST_DROP := 1.4
+const COAST_START := 0.78  # 중심에서 이 비율보다 멀어지면 점점 바다가 된다 (월드 경계). 마지막 링(화산)이 잘리지 않게 바깥으로
+const COAST_DROP := 3.0  # 해안을 늦게 시작하는 대신 가파르게 떨어뜨려 지도 가장자리는 바다로 남긴다
 const KINGDOM_FLOOR_RADIUS := 3
-const CHEST_COUNT := 40
+const CHEST_COUNT := 90  # 월드 넓이에 비례 (192칸일 때 40개)
+## 나무·바위·광석을 _object_for 밀도의 이 비율만큼만 만든다. 매일 아침 이 총량까지 다시 자란다 (D-035, 사용자 결정)
+const RESOURCE_DENSITY := 0.25
 const CHEST_MIN_DISTANCE := 20.0
 
 
@@ -39,10 +41,24 @@ static func generate(seed_text: String) -> WorldData:
 			var wobbled := distance + ring_noise.get_noise_2d(x, y) * RING_WOBBLE
 			var terrain := _terrain_for(e, _sample(moisture, cell), _ring_for(wobbled))
 			data.set_terrain(cell, terrain)
-			data.set_object(cell, _object_for(terrain, rng.randf()))
+			# 굴림을 밀도로 나눠서 각 오브젝트 확률을 RESOURCE_DENSITY배로 낮춘다 (굴리는 횟수는 같아 시드 결과가 안정적)
+			data.set_object(cell, _object_for(terrain, rng.randf() / RESOURCE_DENSITY))
 	_clear_kingdom_site(data)
 	_place_chests(data, rng)
+	data.resource_targets = count_resources(data)
 	return data
+
+
+## 바이옴·종류별 나무·바위·광석 수: Vector2i(지형, 오브젝트) -> 개수. 아침 재생의 목표 총량 (D-035)
+static func count_resources(data: WorldData) -> Dictionary:
+	var counts := {}
+	for i in data.objects.size():
+		var obj := data.objects[i]
+		if obj == WorldData.Obj.NONE or obj == WorldData.Obj.CHEST:
+			continue
+		var key := Vector2i(data.terrain[i], obj)
+		counts[key] = counts.get(key, 0) + 1
+	return counts
 
 
 static func _make_noise(seed_value: int, frequency: float) -> FastNoiseLite:

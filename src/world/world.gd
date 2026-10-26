@@ -197,6 +197,55 @@ func mark_explored(cells: Array[Vector2i]) -> Array[Vector2i]:
 	return changed
 
 
+## 아침 재생 (D-035, 호스트만): 바이옴·종류별로 처음 총량(data.resource_targets)보다 모자란 만큼 같은 바이옴 빈칸에 다시 자라게 한다.
+## blocked(cell)이 true인 칸(왕국 영토·건물·플레이어 근처)에는 자라지 않는다. 자란 [칸, 오브젝트] 목록을 돌려준다(참가자에게 보낸다)
+func regrow(rng: RandomNumberGenerator, blocked: Callable) -> Array:
+	var counts := {}
+	var empty := {}  # 지형 -> 빈칸 목록
+	for y in data.size.y:
+		for x in data.size.x:
+			var cell := Vector2i(x, y)
+			var obj := data.get_object(cell)
+			var terrain := data.get_terrain(cell)
+			if obj in HARVESTABLE:
+				var key := Vector2i(terrain, obj)
+				counts[key] = counts.get(key, 0) + 1
+			elif obj == WorldData.Obj.NONE and terrain != WorldData.Terrain.WATER:
+				if not empty.has(terrain):
+					empty[terrain] = []
+				empty[terrain].append(cell)
+	var grown := []
+	for key: Vector2i in data.resource_targets:
+		var missing: int = data.resource_targets[key] - counts.get(key, 0)
+		var pool: Array = empty.get(key.x, [])
+		while missing > 0 and not pool.is_empty():
+			var pick := rng.randi_range(0, pool.size() - 1)
+			var cell: Vector2i = pool[pick]
+			pool[pick] = pool.back()
+			pool.pop_back()
+			if blocked.call(cell):
+				continue
+			grown.append([cell, key.y])
+			missing -= 1
+	apply_grown(grown)
+	return grown
+
+
+## 다시 자란 오브젝트를 놓는다. 참가자는 호스트가 보낸 목록을 그대로 따른다
+func apply_grown(grown: Array) -> void:
+	var cells: Array[Vector2i] = []
+	for entry: Array in grown:
+		var cell: Vector2i = entry[0]
+		var obj: int = entry[1]
+		if data.get_object(cell) != WorldData.Obj.NONE:
+			continue
+		data.set_object(cell, obj)
+		object_layer.set_cell(cell, TilesetBuilder.OBJECT_SOURCE, Vector2i(obj, 0))
+		cells.append(cell)
+	if not cells.is_empty():
+		Events.map_cells_changed.emit(cells)
+
+
 func _show_hp_bar(cell: Vector2i) -> void:
 	_hp_bar_time[cell] = HP_BAR_TIME
 	_hp_overlay.queue_redraw()

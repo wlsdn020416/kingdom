@@ -37,7 +37,9 @@ theme/custom_font="res://assets/fonts/kingdom_dot.ttf"
 2d_physics/layer_3="buildings"
 2d_physics/layer_4="player"
 2d_physics/layer_5="enemies"
+2d_physics/layer_6="passable"
 
 [rendering]
 
 textures/canvas_textures/default_texture_filter=0
+textures/vram_compression/import_etc2_astc=true

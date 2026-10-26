@@ -2,7 +2,8 @@ class_name Core
 extends StaticBody2D
 ## 왕국 핵 (3x3칸). 체력이 0이 되면 왕국 멸망.
 
-const LIGHT_RADIUS := 280.0
+const LIGHT_RADIUS := 210.0
+const LIGHT_ENERGY_SCALE := 0.35
 const SPRITE_TEXTURE := preload("res://assets/kingdom/castle.png")
 ## 기단을 기존 3×3칸 충돌 영역의 아래쪽에 맞추고 탑은 위로 솟게 한다.
 const SPRITE_OFFSET := Vector2(-48, -84)
@@ -12,7 +13,7 @@ var hp := Balance.CORE_MAX_HP
 
 
 func _ready() -> void:
-	Fx.add_light(self, LIGHT_RADIUS)
+	Fx.add_light(self, LIGHT_RADIUS, LIGHT_ENERGY_SCALE)
 
 
 func take_damage(amount: float) -> void:
