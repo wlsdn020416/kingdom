@@ -11,8 +11,9 @@ signal world_sound_requested(id: String, at: Vector2)
 signal ui_sound_requested(id: String)
 ## 호스트가 확정한 명중·폭발의 픽셀 효과. 크기·방향은 연출만 바꾸며 피해 판정과 무관하다.
 signal combat_effect_requested(id: String, at: Vector2, size: float, angle: float)
-## 적이 피해를 받음 (피해 숫자, D-023). emphasis = 마무리 일격·처형자·선제공격처럼 패시브로 강해진 공격. 호스트가 참가자에게 공유한다
-signal damage_dealt(at: Vector2, amount: float, emphasis: bool)
+## 적이 피해를 받음 (피해 숫자, D-023). emphasis = 마무리 일격·처형자·선제공격처럼 패시브로 강해진 공격. 호스트가 참가자에게 공유한다.
+## source = 때린 쪽(peer id, 탑은 Enemy.SOURCE_TOWER). 때린 사람 화면만 무기 타격감을 낸다 (D-029)
+signal damage_dealt(at: Vector2, amount: float, emphasis: bool, source: int)
 ## 화면 흔들림 (폭발·보스). 각자 화면에서 내 캐릭터와의 거리만큼 약해진다. at이 무한 좌표면 거리와 무관. 호스트가 참가자에게 공유한다
 signal screen_shake_requested(at: Vector2, strength: float)
 ## 채집·상자·처치 보상. 플레이어 개인 인벤토리에 들어간다(D-014). 예: {"wood": 3}

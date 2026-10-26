@@ -24,8 +24,10 @@ const KEYS := {
 	"confirm": [KEY_ENTER, KEY_KP_ENTER],
 }
 
+## 우클릭은 무기 스킬(스킬 있는 무기만, D-027). 설치 모드에서는 스킬이 꺼지므로 우클릭이 철거다
 const MOUSE_BUTTONS := {
 	"attack": MOUSE_BUTTON_LEFT,
+	"weapon_skill": MOUSE_BUTTON_RIGHT,
 	"build_remove": MOUSE_BUTTON_RIGHT,
 }
 

@@ -10,11 +10,14 @@ signal attacked(kind: String, data: Dictionary)
 signal sound_requested(id: String, at: Vector2)
 ## 순수 공격 연출. PlayerSync가 다른 사람에게 같은 모션을 보여준다.
 signal attack_visual_requested(id: String, direction: Vector2)
+## 피해 없이 공유하는 무기 스킬 그림.
+signal weapon_effect_requested(id: String, at: Vector2, scale: float, angle: float)
 ## 패시브 발동의 위치·범위 연출. 피해·회복 판정을 전송하지 않는다.
 signal passive_visual_requested(id: String, at: Vector2, radius: float, angle: float)
 
 const DASH_SPEED := 950.0
 const DASH_TIME := 0.18
+const KICK_RECOVERY := 40.0  # 공격 반동 화면이 초당 돌아오는 px
 const LIGHT_RADIUS := 230.0
 ## 가로 한 줄 시트: 정면 4칸, 뒷면 4칸, 오른쪽 측면 4칸(왼쪽은 좌우 반전). 각 방향 0·2번 칸이 서 있는 자세.
 const SPRITE_SHEET := preload("res://assets/characters/player.png")
@@ -38,6 +41,8 @@ var hits_world := true
 var _fire_cooldown := 0.0
 var _invuln_time := 0.0
 var _shield_time := 0.0
+var _counter := {}  # 반격 자세 중인 스킬 (비었으면 없음)
+var _blocked := 0  # 반격 자세 중 막은 공격 수
 var _dash_time := 0.0
 var _dash_velocity := Vector2.ZERO
 var _dash_cooldown := 0.0
@@ -49,6 +54,9 @@ var _since_hit := 0.0  # 재생 패시브: 마지막으로 맞은 뒤 지난 시
 var _last_stand_cooldown := 0.0
 var _respawn_time := 0.0
 var _shake := 0.0
+var _kick := Vector2.ZERO  # 공격 반동으로 밀린 화면 (WeaponArtDB.FEEL "kick")
+## 화면 흔들림·반동 배율. 환경 설정(D-030)에서 Main이 정한다. 0이면 흔들리지 않는다
+var shake_scale := 1.0
 var _sprite := Sprite2D.new()
 var _walk_time := 0.0
 var weapon_visual := WeaponVisual.new()
@@ -62,9 +70,9 @@ func _ready() -> void:
 	_sprite.hframes = SPRITE_FRAMES_PER_DIR * 3
 	# 발이 충돌 원 중심보다 조금 아래에 오도록 올린다
 	_sprite.position = Vector2(0, -4)
+	add_child(_sprite)
 	add_child(weapon_visual)
 	weapon_visual.setup(_sprite)
-	add_child(_sprite)
 	_sprite.add_child(equipment_visual)
 	equipment_visual.setup(_sprite)
 	equipment_visual.set_items(equipment.equipped)
@@ -90,6 +98,8 @@ func _physics_process(delta: float) -> void:
 		return
 	_invuln_time -= delta
 	_shield_time -= delta
+	if _shield_time <= 0.0 and not _counter.is_empty():
+		_release_counter()
 	_fire_cooldown -= delta
 	_dash_cooldown -= delta
 	_last_stand_cooldown -= delta
@@ -114,7 +124,8 @@ func _physics_process(delta: float) -> void:
 
 func _process(delta: float) -> void:
 	_shake = move_toward(_shake, 0.0, 30.0 * delta)
-	camera.offset = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * _shake
+	_kick = _kick.move_toward(Vector2.ZERO, KICK_RECOVERY * delta)
+	camera.offset = Vector2(randf_range(-1, 1), randf_range(-1, 1)) * _shake + _kick
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -125,6 +136,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	if not skills_enabled:
+		return
+	# 창이 열려 있거나 HUD 위에서 누른 우클릭은 기본 공격처럼 무시한다
+	if event.is_action_pressed("weapon_skill") and attack_enabled:
+		use_weapon_skill()
+		get_viewport().set_input_as_handled()
 		return
 	for slot in Equipment.MAX_SKILLS:
 		if event.is_action_pressed("skill_%d" % (slot + 1)):
@@ -138,7 +154,22 @@ func use_skill(slot: int) -> void:
 	if slot >= bar.size() or not equipment.is_ready(bar[slot]):
 		Events.ui_sound_requested.emit("error")
 		return
-	var skill: Dictionary = ItemDB.ITEMS[bar[slot]]["skill"].duplicate()
+	_cast_skill(bar[slot])
+
+
+## 우클릭: 스킬 있는 무기의 스킬. 스킬 없는 무기면 아무 일도 없다
+func use_weapon_skill() -> void:
+	var item := equipment.weapon_skill_item()
+	if item == "":
+		return
+	if not equipment.is_ready(item):
+		Events.ui_sound_requested.emit("error")
+		return
+	_cast_skill(item)
+
+
+func _cast_skill(item: String) -> void:
+	var skill: Dictionary = ItemDB.ITEMS[item]["skill"].duplicate()
 	if skill.has("damage"):
 		skill["damage"] *= 1.0 + progression.value("skill_power") / 100.0
 	if skill.has("amount"):
@@ -146,10 +177,10 @@ func use_skill(slot: int) -> void:
 	Skills.cast(skill, self)
 	if progression.value("skill_power") > 0.0:
 		show_passive("skill_power")
-	equipment.start_cooldown(bar[slot], 1.0 - progression.value("tactician") / 100.0)
-	var id: String = ItemDB.ITEMS[bar[slot]]["skill"]["id"]
-	if id in ["shotgun", "fireball", "bomb"]:
-		_show_attack(bar[slot])
+	equipment.start_cooldown(item, 1.0 - progression.value("tactician") / 100.0)
+	var id: String = ItemDB.ITEMS[item]["skill"]["id"]
+	if WeaponArtDB.has_art(item):
+		_show_attack(item)
 	# 폭탄은 던질 때가 아니라 실제 폭발했을 때 월드에서 울린다.
 	if id != "bomb":
 		sound_requested.emit(id, global_position)
@@ -161,7 +192,7 @@ func max_hp() -> float:
 
 func fire(params: Dictionary) -> void:
 	if not params.has("art"):
-		params["art"] = WeaponArtDB.BASIC_PROJECTILES.get(equipment.item_in("weapon"), "arrow")
+		params["art"] = WeaponArtDB.basic_projectile(equipment.item_in("weapon"))
 	params["harvest_radius"] = progression.value("wide_harvest")
 	params["hits_world"] = hits_world
 	var direction: Vector2 = params["direction"]
@@ -170,10 +201,40 @@ func fire(params: Dictionary) -> void:
 	attacked.emit("projectile", {"at": at, "params": params})
 
 
-## 주변 적 모두에게 피해 (함성)
-func blast(radius: float, damage: float) -> void:
-	Melee.blast(get_tree(), global_position, radius, damage)
-	attacked.emit("blast", {"origin": global_position, "radius": radius, "damage": damage})
+## 주변 적 모두에게 피해 (함성·내려찍기·서리 고리). slow: {"slow_factor", "slow_time"}
+func blast(radius: float, damage: float, slow := {}) -> void:
+	blast_at(global_position, radius, damage, slow)
+
+
+## center 주변 적 모두에게 피해 (화살비·낙뢰·돌진 베기 경로). 호스트는 center가 나에게서 Skills.MAX_TARGET_RANGE 안일 때만 다시 실행한다
+func blast_at(center: Vector2, radius: float, damage: float, slow := {}) -> void:
+	var factor: float = slow.get("slow_factor", 1.0)
+	var duration: float = slow.get("slow_time", 0.0)
+	Melee.blast(get_tree(), center, radius, damage, Enemy.SOURCE_LOCAL, factor, duration)
+	attacked.emit("blast", {"origin": global_position, "center": center, "radius": radius, "damage": damage,
+		"slow_factor": factor, "slow_time": duration})
+
+
+## 돌진 베기: 조준 방향으로 distance만큼 대시처럼 미끄러진다 (대시처럼 그동안 피해를 받지 않는다)
+func lunge(direction: Vector2, distance: float) -> void:
+	_dash_velocity = direction.normalized() * DASH_SPEED
+	_dash_time = distance / DASH_SPEED
+
+
+## 반격 자세: duration 동안 피해를 막고, 끝나면 막은 횟수만큼 강해진 충격파를 낸다 (수호검 계열, D-028)
+func activate_counter(skill: Dictionary) -> void:
+	show_weapon_effect("counter_stance", global_position, 0.6)
+	_counter = skill
+	_blocked = 0
+	_shield_time = skill["duration"]
+
+
+func _release_counter() -> void:
+	var damage: float = _counter["damage"] + _counter["per_block"] * _blocked
+	show_weapon_effect("counter_wave", global_position, _counter["radius"] / WeaponArtDB.EXPLOSION_RADIUS)
+	blast(_counter["radius"], damage)
+	Fx.burst(get_tree(), global_position, Skills.color("counter"), 20 + _blocked * 4, _counter["radius"] * 2.0)
+	_counter = {}
 
 
 func dash() -> void:
@@ -224,7 +285,12 @@ func activate_shield(duration: float) -> void:
 
 
 func take_damage(amount: float) -> void:
-	if is_dead or _invuln_time > 0.0 or _shield_time > 0.0 or _dash_time > 0.0:
+	if is_dead or _invuln_time > 0.0 or _dash_time > 0.0:
+		return
+	if _shield_time > 0.0:
+		if not _counter.is_empty():
+			_blocked += 1
+			heal(_counter.get("heal_per_block", 0.0))
 		return
 	_since_hit = 0.0
 	var reduction := progression.value("iron_skin") + (progression.value("bulwark_aura") if in_territory else 0.0)
@@ -242,7 +308,7 @@ func take_damage(amount: float) -> void:
 		return
 	hp -= amount
 	_invuln_time = Balance.PLAYER_HIT_INVULN
-	_shake = 6.0
+	add_shake(6.0)
 	Fx.float_text(get_tree(), global_position, "-%d" % amount, Color("ff7060"))
 	if hp <= 0.0:
 		_die()
@@ -252,17 +318,18 @@ func take_damage(amount: float) -> void:
 
 func _die() -> void:
 	is_dead = true
+	_counter = {}
 	sound_requested.emit("player_death", global_position)
 	inventory.clear()
 	equipment.lose_bag()
-	progression.lose_unspent()
+	progression.lose_level_progress()
 	_respawn_time = Balance.RESPAWN_TIME * (1.0 - progression.value("quick_return") / 100.0)
 	collision_layer = 0
 	Fx.burst(get_tree(), global_position, Color("ff7060"), 20)
 	_sprite.visible = false
 	weapon_visual.hide()
 	Events.player_died.emit()
-	Events.message.emit("쓰러졌습니다. 들고 있던 자원, 가방 장비, 쓰지 않은 경험치를 모두 잃었습니다. %d초 뒤 왕국에서 부활합니다" % ceili(_respawn_time))
+	Events.message.emit("쓰러졌습니다. 들고 있던 자원, 가방 장비, 이번 레벨의 경험치를 잃었습니다. %d초 뒤 왕국에서 부활합니다" % ceili(_respawn_time))
 	queue_redraw()
 
 
@@ -284,8 +351,13 @@ func appearance() -> Dictionary:
 
 
 ## 폭발·보스 같은 화면 흔들림 (D-023). 더 센 흔들림이 이긴다
+## 공격할 때 화면을 조준 방향(양수) 또는 반대(음수)로 살짝 민다 (무기별 반동, D-029)
+func add_kick(strength: float) -> void:
+	_kick = aim_direction * strength * shake_scale
+
+
 func add_shake(strength: float) -> void:
-	_shake = maxf(_shake, strength)
+	_shake = maxf(_shake, strength * shake_scale)
 
 
 func respawn_time_left() -> float:
@@ -307,6 +379,7 @@ func _fire_weapon() -> void:
 	weapon["harvest_radius"] = progression.value("wide_harvest")
 	weapon["hits_world"] = hits_world
 	_show_attack(equipment.item_in("weapon"))
+	add_kick(WeaponArtDB.feel(equipment.item_in("weapon"))["kick"])
 	_fire_cooldown = 1.0 / float(weapon["rate"])
 	sound_requested.emit(SoundDB.weapon(equipment.item_in("weapon")), global_position)
 	if weapon.get("melee", false):
@@ -321,6 +394,8 @@ func _fire_weapon() -> void:
 		fire({"direction": aim.rotated(turn), "damage": weapon["damage"], "speed": weapon["speed"],
 			"lifetime": weapon.get("lifetime", 0.9), "pierce": weapon.get("pierce", false),
 			"splash_radius": weapon.get("splash_radius", 0.0), "execute_bonus": weapon["execute_bonus"],
+			"slow_factor": weapon.get("slow_factor", 1.0), "slow_time": weapon.get("slow_time", 0.0),
+			"knockback": weapon.get("knockback", 0.0), "pierce_ramp": weapon.get("pierce_ramp", 0.0), "chain": weapon.get("chain", 0),
 			"opener_bonus": weapon["opener_bonus"], "harvest_power": weapon["harvest_power"], "emphasis": weapon.get("emphasis", false)})
 
 
@@ -421,3 +496,11 @@ func _draw() -> void:
 func _show_attack(id: String) -> void:
 	weapon_visual.attack(id, aim_direction, progression.value("sword_sweep"), 1.0 + progression.value("blade_reach") / 100.0)
 	attack_visual_requested.emit(id, aim_direction)
+
+
+## 연출 요청은 전투 명령과 분리해 피해 중복 없이 공유한다.
+func show_weapon_effect(id: String, at: Vector2, scale := 1.0, angle := 0.0) -> void:
+	if id not in WeaponArtDB.PLAYER_EFFECTS:
+		return
+	CombatEffect.spawn(get_tree(), id, at, scale, angle)
+	weapon_effect_requested.emit(id, at, scale, angle)

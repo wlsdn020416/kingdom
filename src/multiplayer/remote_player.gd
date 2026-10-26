@@ -35,9 +35,9 @@ func _ready() -> void:
 	_sprite.texture = Player.SPRITE_SHEET
 	_sprite.hframes = Player.SPRITE_FRAMES_PER_DIR * 3
 	_sprite.position = Vector2(0, -4)
+	add_child(_sprite)
 	add_child(weapon_visual)
 	weapon_visual.setup(_sprite)
-	add_child(_sprite)
 	_sprite.add_child(equipment_visual)
 	equipment_visual.setup(_sprite)
 	_name_label.add_theme_font_size_override("font_size", 8)

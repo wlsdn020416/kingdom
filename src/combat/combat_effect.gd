@@ -18,7 +18,7 @@ static func spawn(tree: SceneTree, id: String, at: Vector2, size := 1.0, angle :
 	var layer := tree.get_first_node_in_group("fx_layer")
 	if layer == null:
 		return null
-	var passive := PassiveEffectDB.EFFECTS.has(id)
+	var passive: bool = PassiveEffectDB.EFFECTS.has(id) or WeaponArtDB.EFFECTS.get(id, {}).get("tree", false)
 	var pending := int(layer.get_meta(PENDING_META, 0))
 	if passive and layer.get_child_count() + pending >= PassiveEffectDB.MAX_VISIBLE:
 		return null
@@ -57,7 +57,7 @@ func _draw() -> void:
 		return
 	var size := Vector2.ONE * WeaponArtDB.EFFECT_SIZE * display_scale
 	var duration: float = WeaponArtDB.EFFECTS[effect_id]["duration"]
-	draw_texture_rect_region(TEXTURE, Rect2(-size / 2.0, size), WeaponArtDB.effect_region(effect_id, _elapsed / duration))
+	draw_texture_rect_region(WeaponArtDB.effect_texture(effect_id), Rect2(-size / 2.0, size), WeaponArtDB.effect_region(effect_id, _elapsed / duration))
 
 
 func effect_duration() -> float:

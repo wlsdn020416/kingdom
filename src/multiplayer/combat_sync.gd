@@ -9,6 +9,7 @@ const SNAPSHOT_INTERVAL := 0.1  # 초당 10번
 const MAX_HITS_PER_SNAPSHOT := 48  # 피해 숫자는 적 모습과 함께 모아 보낸다. 넘치면 버린다 (연출일 뿐)
 ## 참가자가 보낸 공격 위치가 호스트가 아는 그 사람 위치에서 이보다 멀면 무시한다 (요청을 믿지 않는다, AGENTS 5절)
 const MAX_ATTACK_OFFSET := 4.0 * Balance.TILE
+const MAX_BLAST_RADIUS := 200.0  # 참가자가 보낸 범위 공격 반경 상한 (가장 큰 스킬보다 조금 크게)
 const SOUND_REQUEST_INTERVAL_MS := 40
 
 var _net: NetSession
@@ -33,9 +34,9 @@ func setup(net: NetSession, main: Main) -> void:
 		Events.world_sound_requested.connect(_relay_world_sound)
 		Events.enemy_killed.connect(func(enemy: Node) -> void: _enemy_died.rpc((enemy as Enemy).net_id))
 		Events.enemy_shot.connect(func(at: Vector2, params: Dictionary) -> void: _enemy_shot.rpc(at, params))
-		Events.damage_dealt.connect(func(at: Vector2, amount: float, emphasis: bool) -> void:
+		Events.damage_dealt.connect(func(at: Vector2, amount: float, emphasis: bool, source: int) -> void:
 			if _pending_hits.size() < MAX_HITS_PER_SNAPSHOT:
-				_pending_hits.append([at, amount, emphasis]))
+				_pending_hits.append([at, amount, emphasis, source]))
 		Events.screen_shake_requested.connect(func(at: Vector2, strength: float) -> void:
 			if _main.player_sync.is_running():
 				_shake.rpc(at, strength))
@@ -73,12 +74,12 @@ func _effect(id: String, at: Vector2, size: float, angle: float) -> void:
 	CombatEffect.spawn(get_tree(), id, at, size, angle)
 
 
-## 호스트의 피해 숫자 묶음 [위치, 피해, 강조] (D-023)
+## 호스트의 피해 숫자 묶음 [위치, 피해, 강조, 때린 사람 peer id] (D-023). 내가 때린 것이면 내 무기 타격감도 낸다 (D-029)
 @rpc("authority", "reliable")
 func _hits(hits: Array) -> void:
 	hits_received += hits.size()
 	for hit: Array in hits:
-		_main.show_damage(hit[0], hit[1], hit[2])
+		_main.show_damage(hit[0], hit[1], hit[2], hit[3])
 
 
 @rpc("authority", "unreliable")
@@ -232,7 +233,12 @@ func _replay_attack(kind: String, data: Dictionary) -> void:
 			weapon["hits_world"] = true
 			Melee.swing(get_tree(), origin, data["direction"], weapon)
 		"blast":
-			Melee.blast(get_tree(), origin, data["radius"], data["damage"], sender)
+			# 조준 지점 스킬(화살비·낙뢰·돌진 베기)은 center가 보낸 사람에게서 너무 멀면 버린다 (D-028)
+			var center: Vector2 = data.get("center", origin)
+			if center.distance_to(origin) > Skills.MAX_TARGET_RANGE + 1.0:
+				return
+			Melee.blast(get_tree(), center, minf(data["radius"], MAX_BLAST_RADIUS), data["damage"], sender,
+				data.get("slow_factor", 1.0), data.get("slow_time", 0.0))
 
 
 @rpc("any_peer", "reliable")

@@ -23,6 +23,7 @@ func setup(net: NetSession, local_player: Player, remote_parent: Node) -> void:
 	_net.members_changed.connect(_on_members_changed)
 	_local.attack_visual_requested.connect(_send_attack_visual)
 	_local.passive_visual_requested.connect(_send_passive_visual)
+	_local.weapon_effect_requested.connect(_send_weapon_effect)
 	_local.progression.changed.connect(_send_ranks)
 
 
@@ -68,7 +69,7 @@ func _physics_process(delta: float) -> void:
 	_state.rpc(_local.global_position, _local.aim_direction, look["frame"], look["flip"], look["shown"], _local.is_dead, look["weapon"], look["gear"])
 
 
-## 패시브를 배우면 단계를 모두에게 알린다. 경험치만 바뀐 경우는 보내지 않는다
+## 패시브를 배우면 단계를 모두에게 알린다. 경험치·레벨만 바뀐 경우는 보내지 않는다
 func _send_ranks() -> void:
 	if _running and _local.progression.ranks != _sent_ranks:
 		_sent_ranks = _local.progression.ranks.duplicate()
@@ -109,7 +110,7 @@ func _passive_visual(id: String, at: Vector2, radius: float, angle: float) -> vo
 @rpc("any_peer", "reliable")
 func _attack_visual(id: String, direction: Vector2) -> void:
 	var actor := remote(multiplayer.get_remote_sender_id())
-	if actor != null and WeaponArtDB.WEAPONS.has(id):
+	if actor != null and WeaponArtDB.has_art(id):
 		actor.weapon_visual.attack(id, direction, PassiveDB.value_in(actor.ranks, "sword_sweep"), 1.0 + PassiveDB.value_in(actor.ranks, "blade_reach") / 100.0)
 
 
@@ -157,3 +158,18 @@ func _on_members_changed() -> void:
 		if not _net.members.has(peer_id):
 			_remotes[peer_id].queue_free()
 			_remotes.erase(peer_id)
+
+
+func _send_weapon_effect(id: String, at: Vector2, scale: float, angle: float) -> void:
+	if _running:
+		_weapon_effect.rpc(id, at, scale, angle)
+
+
+@rpc("any_peer", "reliable")
+func _weapon_effect(id: String, at: Vector2, scale: float, angle: float) -> void:
+	var actor := remote(multiplayer.get_remote_sender_id())
+	if actor == null or id not in WeaponArtDB.PLAYER_EFFECTS or not at.is_finite() or not is_finite(scale) or not is_finite(angle):
+		return
+	if scale <= 0.0 or scale > CombatEffect.MAX_DISPLAY_SCALE or actor.global_position.distance_to(at) > Skills.MAX_TARGET_RANGE + 4.0 * Balance.TILE:
+		return
+	CombatEffect.spawn(get_tree(), id, at, scale, angle)

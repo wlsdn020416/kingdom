@@ -39,21 +39,32 @@ func weapon() -> Dictionary:
 	return ItemDB.ITEMS[equipped["weapon"]]["weapon"]
 
 
+## 숫자키 1~4 스킬바. 무기 스킬은 우클릭으로 따로 쓰므로 빠진다 (D-027)
 func skill_bar() -> Array[String]:
 	var bar: Array[String] = []
-	for id in _worn_items():
-		if ItemDB.ITEMS[id].has("skill") and bar.size() < MAX_SKILLS:
+	for id in _gear_skills():
+		if bar.size() < MAX_SKILLS:
 			bar.append(id)
 	return bar
 
 
 ## 스킬이 5개 이상이라 스킬바에 못 올라간 개수
 func hidden_skill_count() -> int:
-	var count := 0
+	return maxi(0, _gear_skills().size() - MAX_SKILLS)
+
+
+## 우클릭으로 쓰는 무기 스킬의 장비 id. 무기에 스킬이 없으면 ""
+func weapon_skill_item() -> String:
+	var id: String = equipped["weapon"]
+	return id if ItemDB.ITEMS[id].has("skill") else ""
+
+
+func _gear_skills() -> Array[String]:
+	var ids: Array[String] = []
 	for id in _worn_items():
-		if ItemDB.ITEMS[id].has("skill"):
-			count += 1
-	return maxi(0, count - MAX_SKILLS)
+		if id != equipped["weapon"] and ItemDB.ITEMS[id].has("skill"):
+			ids.append(id)
+	return ids
 
 
 func owns(id: String) -> bool:
@@ -63,6 +74,21 @@ func owns(id: String) -> bool:
 func add_to_bag(id: String) -> void:
 	bag.append(id)
 	changed.emit()
+
+
+## 무기 강화(D-028): from을 to로 바꾼다. 들고 있는 것을 먼저 바꾸고, 없으면 가방에서 바꾼다. 둘 다 없으면 false
+func replace_item(from: String, to: String) -> bool:
+	for slot: String in equipped:
+		if equipped[slot] == from:
+			equipped[slot] = to
+			changed.emit()
+			return true
+	var index := bag.find(from)
+	if index < 0:
+		return false
+	bag[index] = to
+	changed.emit()
+	return true
 
 
 func remove_from_bag(id: String) -> bool:

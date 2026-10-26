@@ -3,6 +3,7 @@ extends RefCounted
 ## 임시 이펙트: 파티클, 떠오르는 글자, 밤 조명. Phase 2에서 픽셀아트 이펙트로 교체한다.
 
 const LIGHT_TEXTURE_SIZE := 256
+const LIGHT_ENERGY_META := &"light_energy_scale"
 
 static var _light_texture: GradientTexture2D
 
@@ -80,11 +81,12 @@ static func damage_number(tree: SceneTree, at: Vector2, amount: float, emphasis:
 
 
 ## 밤에 주변을 밝히는 빛. DayNight가 "lights" 그룹의 밝기를 조절한다.
-static func add_light(owner: Node2D, radius: float) -> PointLight2D:
+static func add_light(owner: Node2D, radius: float, energy_scale := 1.0) -> PointLight2D:
 	var light := PointLight2D.new()
 	light.texture = _get_light_texture()
 	light.texture_scale = radius * 2.0 / LIGHT_TEXTURE_SIZE
 	light.energy = 0.0
+	light.set_meta(LIGHT_ENERGY_META, energy_scale)
 	light.add_to_group("lights")
 	owner.add_child(light)
 	return light

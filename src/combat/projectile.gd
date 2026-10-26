@@ -9,9 +9,13 @@ enum Team { PLAYER, ENEMY, TOWER }
 const MASKS := {
 	Team.PLAYER: PhysicsLayers.OBJECTS | PhysicsLayers.ENEMIES,
 	Team.TOWER: PhysicsLayers.ENEMIES,
-	Team.ENEMY: PhysicsLayers.OBJECTS | PhysicsLayers.BUILDINGS | PhysicsLayers.PLAYER,
+	Team.ENEMY: PhysicsLayers.OBJECTS | PhysicsLayers.BUILDINGS | PhysicsLayers.PASSABLE | PhysicsLayers.PLAYER,
 }
 const MAX_HITS_PER_STEP := 8
+const CHAIN_RANGE := 110.0  # 번개가 다음 적으로 튈 수 있는 거리 (D-028)
+const CHAIN_RATIO := 0.7
+const SECOND_BLAST_DELAY := 0.4
+const SECOND_BLAST_SCALE := 0.7  # 2차 폭발의 피해·반경 배수
 const TEXTURE := preload("res://assets/combat/projectiles.png")
 
 var team := Team.PLAYER
@@ -29,6 +33,10 @@ var harvest_power := 0.0  # 숙련 채집꾼 패시브: 나무·바위·광석�
 var emphasis := false  # 마무리 일격처럼 강해진 기본 공격 (피해 숫자 강조, D-023)
 var slow_factor := 1.0  # 서리탑: 맞은 적의 이동 속도 배수와 지속 시간 (D-022)
 var slow_time := 0.0
+var knockback := 0.0  # 맞은 적을 날아가는 방향으로 미는 힘 (용린 산탄 석궁, D-028)
+var pierce_ramp := 0.0  # 관통할 때마다 피해가 이 비율만큼 늘어난다 (용골 장궁)
+var chain := 0  # 맞은 적에서 근처 적으로 튀는 횟수 (번개 지팡이)
+var second_blast := false  # 폭발한 자리에서 한 번 더 터진다 (흑요석 공성 석궁)
 var source := Enemy.SOURCE_LOCAL  # 쏜 플레이어의 peer id (처치 보상용)
 ## false면 나무·바위·건물·핵에 막히기만 하고 피해를 주지 않는다. 멀티플레이 참가자 화면의 탄 (월드·왕국은 호스트만 바꾼다, D-017)
 var hits_world := true
@@ -43,7 +51,8 @@ var _boosted_hit := false
 var _query := PhysicsShapeQueryParameters2D.new()
 
 
-## params: direction(필수), speed, damage, lifetime, radius, pierce, explode_radius, harvest_radius, splash_radius, execute_bonus, color, team, source, hits_world
+## params: direction(필수), speed, damage, lifetime, radius, pierce, explode_radius, harvest_radius, splash_radius, execute_bonus, color, team, source, hits_world,
+## knockback, pierce_ramp, chain, second_blast (D-028)
 static func spawn(tree: SceneTree, at: Vector2, params: Dictionary) -> Projectile:
 	var projectile := Projectile.new()
 	projectile.team = params.get("team", Team.PLAYER)
@@ -61,13 +70,17 @@ static func spawn(tree: SceneTree, at: Vector2, params: Dictionary) -> Projectil
 	projectile.emphasis = params.get("emphasis", false)
 	projectile.slow_factor = params.get("slow_factor", 1.0)
 	projectile.slow_time = params.get("slow_time", 0.0)
+	projectile.knockback = params.get("knockback", 0.0)
+	projectile.pierce_ramp = params.get("pierce_ramp", 0.0)
+	projectile.chain = params.get("chain", 0)
+	projectile.second_blast = params.get("second_blast", false)
 	projectile.source = Enemy.SOURCE_TOWER if projectile.team == Team.TOWER else params.get("source", Enemy.SOURCE_LOCAL)
 	projectile.hits_world = params.get("hits_world", true)
 	projectile.visual_only = params.get("visual_only", false)
 	if projectile.visual_only:
 		projectile.hits_world = false
 	projectile.art_id = params.get("art", "enemy_orb" if projectile.team == Team.ENEMY else "arrow")
-	if not WeaponArtDB.PROJECTILES.has(projectile.art_id):
+	if not WeaponArtDB.has_projectile(projectile.art_id):
 		projectile.art_id = "arrow"
 	projectile._flight_duration = maxf(projectile.lifetime, 0.001)
 	if projectile.team == Team.TOWER:
@@ -114,7 +127,7 @@ func _draw() -> void:
 		angle = _elapsed * WeaponArtDB.BOMB_SPIN
 	draw_set_transform(offset, angle)
 	var size := Vector2.ONE * WeaponArtDB.PROJECTILE_SIZE
-	draw_texture_rect_region(TEXTURE, Rect2(-size / 2.0, size), WeaponArtDB.projectile_region(art_id, _elapsed))
+	draw_texture_rect_region(WeaponArtDB.projectile_texture(art_id), Rect2(-size / 2.0, size), WeaponArtDB.projectile_region(art_id, _elapsed))
 	draw_set_transform(Vector2.ZERO)
 
 
@@ -151,9 +164,14 @@ func _on_hit(body: Object) -> void:
 			_splash(enemy)
 		if slow_time > 0.0:
 			enemy.slow(slow_factor, slow_time)
+		if knockback > 0.0:
+			enemy.knockback(velocity.normalized() * knockback)
 		var dealt := enemy.damage_after_execute(damage, execute_bonus, opener_bonus)
 		_boosted_hit = dealt > damage
 		enemy.take_damage(dealt, source, emphasis or dealt > damage)
+		if chain > 0:
+			_chain_from(enemy)
+		damage *= 1.0 + pierce_ramp
 	elif hits_world or body is Player:
 		# 참가자 화면에 따라 그린 적 탄은 내 캐릭터만 맞힌다. 건물·왕국 핵 피해는 호스트의 탄이 정한다 (D-017)
 		if body.has_method("take_damage"):
@@ -161,6 +179,30 @@ func _on_hit(body: Object) -> void:
 	_show_impact()
 	if not pierce:
 		queue_free()
+
+
+## 번개 연쇄: 맞힌 적에서 가장 가까운 다른 적으로 chain번 튄다. 한 번 튈 때마다 CHAIN_RATIO만큼 약해진다
+func _chain_from(hit: Enemy) -> void:
+	var visited := {hit: true}
+	var current := hit
+	var bolt := damage
+	for i in chain:
+		bolt *= CHAIN_RATIO
+		var next: Enemy = null
+		var best := CHAIN_RANGE
+		for enemy: Enemy in get_tree().get_nodes_in_group("enemies"):
+			var distance := enemy.global_position.distance_to(current.global_position)
+			if not visited.has(enemy) and distance < best:
+				next = enemy
+				best = distance
+		if next == null:
+			return
+		var link := next.global_position - current.global_position
+		Events.combat_effect_requested.emit("lightning_link", (next.global_position + current.global_position) * 0.5, link.length() / WeaponArtDB.LINK_LENGTH, link.angle())
+		visited[next] = true
+		Fx.burst(get_tree(), next.global_position, Skills.color("lightning"), 6, 40.0)
+		next.take_damage(bolt, source)
+		current = next
 
 
 ## 맞힌 적 주변의 다른 적에게 절반 피해 (불씨 폭발)
@@ -179,12 +221,17 @@ func _explode() -> void:
 	# 참가자 화면의 예측 탄은 호스트가 확정해 보낸 폭발음과 겹쳐 울리지 않는다.
 	if hits_world and not visual_only:
 		Events.world_sound_requested.emit("explosion", global_position)
-		Events.combat_effect_requested.emit("explosion", global_position, explode_radius / WeaponArtDB.EXPLOSION_RADIUS, 0.0)
+		Events.combat_effect_requested.emit(WeaponArtDB.explosion_effect(art_id), global_position, explode_radius / WeaponArtDB.EXPLOSION_RADIUS, 0.0)
 		Events.screen_shake_requested.emit(global_position, 7.0)
 	for enemy: Enemy in get_tree().get_nodes_in_group("enemies"):
 		if enemy.global_position.distance_to(global_position) < explode_radius + enemy.radius:
 			if not visual_only:
 				enemy.take_damage(damage, source)
+	if second_blast:
+		# 같은 자리에 잠깐 뒤 터지는 탄을 하나 더 둔다. 호스트·참가자 화면 모두 원래 탄과 같은 규칙으로 만든다
+		Projectile.spawn(get_tree(), global_position, {"direction": Vector2.RIGHT, "speed": 0.0, "lifetime": SECOND_BLAST_DELAY,
+			"damage": damage * SECOND_BLAST_SCALE, "explode_radius": explode_radius * SECOND_BLAST_SCALE, "source": source,
+			"hits_world": hits_world, "visual_only": visual_only, "team": team, "art": art_id, "color": color})
 	if not hits_world:
 		return
 	var world := get_tree().get_first_node_in_group("world") as World
@@ -199,7 +246,7 @@ func _explode() -> void:
 
 func _show_impact() -> void:
 	if hits_world and not visual_only:
-		var effect := "fire_impact" if art_id in ["ember", "fireball", "enemy_orb"] else "impact"
+		var effect := WeaponArtDB.impact_effect(art_id)
 		if emphasis or _boosted_hit:
 			effect = "passive_strike"
 		elif pierce and art_id == "arrow":
