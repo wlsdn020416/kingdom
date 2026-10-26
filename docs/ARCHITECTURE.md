@@ -266,5 +266,5 @@ Fx.add_light(owner, radius, energy_scale=1.0)는 광원별 표시 강도를 메�
 
 ### 아침 재생과 서식 몬스터 (D-035)
 
-`WorldGenerator`는 자원을 `RESOURCE_DENSITY`(25%)만큼만 만들고 바이옴·종류별 개수를 `WorldData.resource_targets`에 남긴다. 호스트의 `Main._on_day_started()`가 `World.regrow(rng, blocked)`로 모자란 만큼 다시 자라게 하고 `WorldSync.send_regrowth()`로 참가자에게 `World.apply_grown()`을 시킨다. `WaveSpawner`는 시작할 때 지형별 칸 목록과 서식 수를 정하고(`_plan_residents`), 첫 낮과 매일 아침 `refill_residents()`로 채운다. 서식 몬스터는 `Enemy.home`·`home_terrain`을 가지고 집 근처를 돌아다닌다(`Balance.RESIDENT_*`). 참가자 쪽 생성기는 꺼져 있어 아침 신호가 와도 채우지 않는다(`can_process()`).
+`WorldGenerator`는 자원을 `RESOURCE_DENSITY`(50%)만큼만 만들고 바이옴·종류별 개수를 `WorldData.resource_targets`에 남긴다. 호스트의 `Main._on_day_started()`가 `World.regrow(rng, blocked)`로 모자란 만큼 다시 자라게 하고 `WorldSync.send_regrowth()`로 참가자에게 `World.apply_grown()`을 시킨다. `WaveSpawner`는 시작할 때 지형별 칸 목록과 서식 수를 정하고(`_plan_residents`), 첫 낮과 매일 아침 `refill_residents()`로 채운다. 서식 몬스터는 `Enemy.home`·`home_terrain`을 가지고 집 근처를 돌아다니며, 플레이어가 `RESIDENT_WAKE_RANGE` 밖이면 잠든다. `CombatSync`는 참가자마다 `SNAPSHOT_RANGE` 안의 적(보스는 항상)만 보낸다. 참가자 쪽 생성기는 꺼져 있어 아침 신호가 와도 채우지 않는다(`can_process()`).
 
