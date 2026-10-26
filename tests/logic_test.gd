@@ -12,6 +12,8 @@ func _initialize() -> void:
 	_test_cooldown()
 	_test_inventory()
 	_test_recipes()
+	_test_settings()
+	_test_weapon_tree()
 	_test_chest_loot()
 	_test_outcome_rolls_use_given_rng()
 	_test_bosses_and_difficulty()
@@ -33,11 +35,75 @@ func _test_health_bar_fill() -> void:
 ## 멀티플레이에서 모든 참가자가 시드만으로 같은 월드를 만들 수 있어야 한다
 func _test_world_is_deterministic() -> void:
 	var a := WorldGenerator.generate("logic-test")
+	var total := 0
+	for key: Vector2i in a.resource_targets:
+		total += a.resource_targets[key]
+	_check(a.resource_targets == WorldGenerator.count_resources(a) and total > 0,
+		"아침 재생 목표(D-035)는 처음 생성된 바이옴·종류별 자원 수 (총 %d개)" % total)
 	var b := WorldGenerator.generate("logic-test")
 	var other := WorldGenerator.generate("logic-test-2")
 	_check(a.terrain == b.terrain and a.objects == b.objects, "같은 시드는 같은 월드")
 	_check(a.terrain != other.terrain, "다른 시드는 다른 월드")
 	_check(a.is_walkable(a.core_cell + Vector2i(0, 4)), "왕국 핵 아래(플레이어 시작 지점)는 걸을 수 있음")
+
+
+## 환경 설정(D-030): 범위 밖 값은 잘리고, 저장한 값을 다시 읽는다
+func _test_settings() -> void:
+	var settings := GameSettings.new()
+	settings.path = "user://settings_logic_test.cfg"
+	settings.set_value("ui_scale", 9.0)
+	settings.set_value("sfx_volume", -1.0)
+	settings.set_value("unknown", 1)
+	_check(is_equal_approx(settings.get_value("ui_scale"), GameSettings.UI_SCALE_MAX) and settings.get_value("sfx_volume") == 0.0
+		and not settings.values.has("unknown"), "설정 값은 범위로 잘리고 모르는 키는 무시")
+	settings.set_value("hitstop", false)
+	settings.save_file()
+	var loaded := GameSettings.new()
+	loaded.path = settings.path
+	loaded.load_file()
+	_check(not loaded.get_value("hitstop") and is_equal_approx(loaded.get_value("ui_scale"), GameSettings.UI_SCALE_MAX),
+		"저장한 설정을 다시 읽음")
+	_check(GameSettings.volume_db(0.0) <= -79.0 and is_equal_approx(GameSettings.volume_db(1.0), 0.0), "볼륨 0은 끔, 1은 0dB")
+
+
+## 무기 트리(D-028): 0단계 4계열은 처음부터, 1단계에서 갈래 2~3개, 2·3단계는 같은 갈래를 한 단계씩 강화(이전 무기 소모)
+func _test_weapon_tree() -> void:
+	var problems: Array[String] = []
+	var families := {}
+	for id: String in ItemDB.ITEMS:
+		var item: Dictionary = ItemDB.ITEMS[id]
+		if not item.has("weapon"):
+			continue
+		if not RecipeDB.RECIPES.has(id):
+			problems.append("%s: 레시피 없음" % id)
+			continue
+		var recipe: Dictionary = RecipeDB.RECIPES[id]
+		var from: String = recipe.get("from", "")
+		var tier: int = recipe["tier"]
+		if from == "":
+			families[item["weapon"]["family"]] = true
+			if tier != 0 or item.has("skill"):
+				problems.append("%s: 기본 무기는 0단계·스킬 없음" % id)
+			var branches := RecipeDB.upgrades_of(id).size()
+			if branches < 2 or branches > 3:
+				problems.append("%s: 갈래 %d개" % [id, branches])
+			continue
+		if RecipeDB.RECIPES[from]["tier"] != tier - 1 or ItemDB.ITEMS[from]["weapon"]["family"] != item["weapon"]["family"]:
+			problems.append("%s: %s의 한 단계 위 같은 계열이 아님" % [id, from])
+		if not item.has("skill"):
+			problems.append("%s: 우클릭 스킬 없음" % id)
+		var next := RecipeDB.upgrades_of(id).size()
+		if (tier < RecipeDB.max_tier() and next != 1) or (tier == RecipeDB.max_tier() and next != 0):
+			problems.append("%s: 갈래 안에서 다음 단계가 %d개" % [id, next])
+	_check(problems.is_empty() and families.size() == 4, "무기 트리: 4계열 기본 → 갈래 2~3개 → 같은 갈래 2·3단계 강화 %s" % [problems])
+	var upgrade_drops := Loot.chest_items().filter(func(id: String) -> bool: return RecipeDB.RECIPES.get(id, {}).has("from"))
+	_check(upgrade_drops.is_empty() and Loot.chest_items().has("old_bow"), "상자에서는 강화 무기가 나오지 않음 (기본 무기·장비만)")
+	var equipment := Equipment.new()
+	equipment.add_to_bag("old_bow")
+	_check(equipment.replace_item("rusty_sword", "greatsword") and equipment.item_in("weapon") == "greatsword"
+		and equipment.replace_item("old_bow", "longbow") and equipment.bag.has("longbow") and not equipment.bag.has("old_bow")
+		and not equipment.replace_item("rusty_sword", "twin_blades"),
+		"강화는 들고 있는 무기를 먼저, 없으면 가방의 무기를 바꾸고, 없으면 실패")
 
 
 ## 스킬바: 스킬 있는 장비만, 슬롯 순서대로 빈칸 없이, 최대 4개
@@ -49,8 +115,8 @@ func _test_skill_bar() -> void:
 	for id in ["fire_staff", "bomb_bag", "guardian_armor", "life_charm"]:
 		equipment.add_to_bag(id)
 		equipment.equip(id)
-	_check(Array(equipment.skill_bar()) == ["fire_staff", "bomb_bag", "guardian_armor", "life_charm"],
-		"스킬은 슬롯 순서대로 빈칸 없이 %s" % [equipment.skill_bar()])
+	_check(Array(equipment.skill_bar()) == ["bomb_bag", "guardian_armor", "life_charm"] and equipment.weapon_skill_item() == "fire_staff",
+		"무기 스킬은 우클릭, 나머지 장비 스킬은 슬롯 순서대로 빈칸 없이 %s (D-027)" % [equipment.skill_bar()])
 	_check(equipment.hidden_skill_count() == 0, "4개까지는 숨김 없음")
 	_check(equipment.bag.has("rusty_sword") and not equipment.bag.has("fire_staff"), "교체된 장비는 가방으로")
 	equipment.unequip("weapon")
@@ -190,6 +256,33 @@ func _test_material_sources() -> void:
 		"건물 데이터: 분류·제작대 단계가 맞고 모든 재료를 얻을 수 있음 %s" % [building_problems])
 	for category: String in BuildingDB.CATEGORIES:
 		_check(BuildingDB.in_category(category).size() >= 6, "%s 탭에 건물이 6종 이상 (%d)" % [BuildingDB.CATEGORY_NAMES[category], BuildingDB.in_category(category).size()])
+	_check(InputBindings.MOUSE_BUTTONS["attack"] == MOUSE_BUTTON_LEFT and InputBindings.MOUSE_BUTTONS["weapon_skill"] == MOUSE_BUTTON_RIGHT,
+		"기본 공격은 좌클릭, 무기 스킬은 우클릭 (D-027)")
+	# 핵 창 비용 구분 (D-027): 제작대 = 몬스터 재료, 방어 = 채집 재료, 영토 = 둘 다
+	var harvested := {}
+	for drops: Dictionary in WorldData.OBJECT_DROPS.values():
+		for kind: String in drops:
+			harvested[kind] = true
+	var hunted := {}
+	for info: Dictionary in EnemyDB.TYPES.values():
+		for kind: String in info.get("drop", {}).get("resources", {}):
+			hunted[kind] = true
+	var only := func(costs: Array, pool: Dictionary) -> bool:
+		return costs.all(func(cost: Dictionary) -> bool: return cost.keys().all(func(kind: String) -> bool: return pool.has(kind)))
+	var widest := Balance.TERRITORY_RADIUS + Balance.TERRITORY_STEP * Balance.TERRITORY_UPGRADES.size()
+	_check(widest < WorldGenerator.RING_EDGES[0], "영토를 끝까지 넓혀도(%d칸) 초원 링(%d칸) 안에 머묾 (D-033)" % [widest, WorldGenerator.RING_EDGES[0]])
+	var mixed := Balance.TERRITORY_UPGRADES.all(func(cost: Dictionary) -> bool:
+		return cost.keys().any(func(kind: String) -> bool: return harvested.has(kind)) and cost.keys().any(func(kind: String) -> bool: return hunted.has(kind)))
+	_check(only.call(RecipeDB.UPGRADES, hunted) and only.call(BuildingDB.DEFENSE_UPGRADES, harvested) and mixed,
+		"핵 창 비용: 제작대는 몬스터 재료, 방어는 채집 재료, 영토는 둘 다")
+	var max_tier := 0
+	for info: Dictionary in BuildingDB.TYPES.values():
+		max_tier = maxi(max_tier, info.get("tier", 0))
+	_check(max_tier <= BuildingDB.max_defense_tier(), "모든 건물을 방어 단계로 열 수 있음 (최고 %d단계)" % max_tier)
+	_check(BuildingDB.player_passable("wood_door") and BuildingDB.player_passable("campfire") and BuildingDB.player_passable("gear_chest")
+			and BuildingDB.player_passable("arrow_tower") and BuildingDB.player_passable("thunder_tower")
+			and not BuildingDB.player_passable("wood_wall") and not BuildingDB.player_passable("essence_wall"),
+		"벽만 플레이어를 막고 문·공성탑·생활 건물은 통과 (D-036)")
 	_check(BuildingDB.TYPES["teleport_tower"].get("outside", false) and not BuildingDB.TYPES["stone_wall"].get("outside", false)
 		and BuildingDB.TYPES["workbench"].get("unique", false), "순간이동 탑은 왕국 밖 가능, 벽은 안에만, 제작대는 하나만")
 	_check(not Balance.RESOURCE_NAMES.has("gold"), "금은 자원이 아님 (경험치로 바뀜, D-015)")
@@ -270,22 +363,26 @@ func _test_passive_tree() -> void:
 	_check(unplaced.is_empty() and PassiveDB.PASSIVES.size() >= 55, "모든 패시브 노드(%d개)가 패시브 창 배치에 있음 %s" % [PassiveDB.PASSIVES.size(), unplaced])
 
 
-## 경험치·패시브(D-015): 비용만큼 쓰고 단계가 오르며, 죽으면 쓰지 않은 경험치만 사라진다
+## 레벨·패시브(D-015, D-024): 레벨업마다 포인트 1개, 단계마다 1포인트, 죽으면 이번 레벨의 경험치만 사라진다
 func _test_progression() -> void:
-	var broken := PassiveDB.PASSIVES.keys().filter(func(id: String) -> bool:
-		var info: Dictionary = PassiveDB.PASSIVES[id]
-		return info["costs"].size() != info["values"].size())
-	_check(broken.is_empty(), "패시브 데이터: 단계별 비용·효과 수가 같음 %s" % [broken])
+	var empty := PassiveDB.PASSIVES.keys().filter(func(id: String) -> bool: return PassiveDB.max_rank(id) < 1)
+	_check(empty.is_empty(), "패시브 데이터: 모든 노드에 단계별 효과가 있음 %s" % [empty])
 	_test_passive_tree()
 	var progression := Progression.new()
-	var first_cost := progression.next_cost("vitality")
-	_check(progression.learn("vitality") != "" and progression.rank("vitality") == 0, "경험치가 모자라면 배울 수 없음")
-	progression.add_xp(first_cost + 5)
-	_check(progression.learn("vitality") == "" and progression.rank("vitality") == 1 and progression.xp == 5,
-		"경험치를 비용만큼 쓰고 1단계 (남은 경험치 %d)" % progression.xp)
+	_check(progression.learn("vitality") != "" and progression.rank("vitality") == 0, "포인트가 없으면 배울 수 없음")
+	var first := Balance.xp_to_next_level(1)
+	_check(progression.add_xp(first - 1) == 0 and progression.level == 1 and progression.points == 0, "경험치가 덜 차면 레벨 그대로")
+	_check(progression.add_xp(1 + 5) == 1 and progression.level == 2 and progression.points == 1 and progression.xp == 5,
+		"경험치가 차면 레벨업, 포인트 1개, 넘친 경험치는 이어짐 (남은 %d)" % progression.xp)
+	_check(Balance.xp_to_next_level(2) > first, "다음 레벨일수록 필요한 경험치가 늘어남")
+	_check(progression.learn("vitality") == "" and progression.rank("vitality") == 1 and progression.points == 0,
+		"포인트 1개로 1단계")
 	_check(progression.value("vitality") == PassiveDB.value_at("vitality", 1), "단계에 맞는 효과 값")
-	progression.lose_unspent()
-	_check(progression.xp == 0 and progression.rank("vitality") == 1, "죽으면 쓰지 않은 경험치만 사라지고 패시브는 남음")
+	var several := Progression.new()
+	_check(several.add_xp(Balance.xp_to_next_level(1) + Balance.xp_to_next_level(2)) == 2 and several.points == 2,
+		"한 번에 많이 받으면 여러 레벨이 오름")
+	progression.lose_level_progress()
+	_check(progression.xp == 0 and progression.level == 2 and progression.rank("vitality") == 1, "죽으면 이번 레벨의 경험치만 사라지고 레벨·패시브는 남음")
 	progression.add_xp(9999)
 	for i in 10:
 		progression.learn("swift")
@@ -303,6 +400,17 @@ func _test_progression() -> void:
 	_check(BuildingDB.discounted({"wood": 10, "stone": 1}, 0.3) == {"wood": 7, "stone": 1}, "건설 비용 할인은 반올림하고 최소 1개")
 	_check(Balance.tower_xp_share(9, 1) == 9 and Balance.tower_xp_share(9, 4) == 3 and Balance.tower_xp_share(2, 4) == 1,
 		"탑 처치 경험치는 플레이어 수로 나눔(올림)")
+	var harvest_rng := RandomNumberGenerator.new()
+	harvest_rng.seed = 7
+	var harvest_hits := 0
+	var harvest_wrong := false
+	for i in 1000:
+		var harvest_xp := Balance.roll_harvest_xp(2, harvest_rng)
+		if harvest_xp > 0:
+			harvest_hits += 1
+		harvest_wrong = harvest_wrong or harvest_xp not in [0, Balance.XP_HARVEST_BY_TIER[2]]
+	_check(not harvest_wrong and harvest_hits > 150 and harvest_hits < 250,
+		"채집 경험치는 약 20%% 확률로만 나옴 (1000번 중 %d번)" % harvest_hits)
 
 
 func _check(ok: bool, label: String) -> void:

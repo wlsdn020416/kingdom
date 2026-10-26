@@ -3,12 +3,18 @@ extends Node
 ## 실행: godot --headless --path . res://tests/smoke_test.tscn
 ## 코드를 고친 뒤 이걸 돌려서 전부 OK면 기본 흐름은 살아 있다는 뜻이다.
 
+const TEST_SETTINGS := "user://settings_smoke_test.cfg"
+
 var _failures := 0
 var _heard: Array[String] = []
 
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	# 이 기기의 실제 환경 설정과 상관없이 기본값으로 검사하고, 바꾼 값은 테스트 파일에만 쓴다 (D-030)
+	Session.settings.path = TEST_SETTINGS
+	Session.settings.reset()
+	await _check_cursor_lifecycle()
 	await _check_title()
 	await _check_passive_graphics()
 	Session.seed_text = "smoke-test"
@@ -16,14 +22,19 @@ func _ready() -> void:
 	add_child(main)
 	await _frames(5)
 	await _check_audio(main)
+	await _check_boss_music(main)
 	_check_terrain_tiles(main.world)
 	_check_object_tiles(main.world)
+	_check_depth_sort(main)
 	_check_health_bars(main)
 	await _check_status_hud(main)
+	await _check_map_bag_art(main)
+	await _check_progression_hud(main)
 	_check_action_bar(main)
 	await _check_weapon_art(main)
 	_check_enemy_art(main)
 	_check_building_art(main)
+	await _check_building_lighting(main)
 	_check_item_art(main)
 	await _check_passive_effects(main)
 
@@ -52,11 +63,17 @@ func _ready() -> void:
 	_check(_total_resources(main) > resources_before, "상자 보상으로 자원 지급")
 
 	await _check_harvest(main)
+	await _check_passable_buildings(main)
+	await _check_daytime_kingdom(main)
+	await _check_kingdom_panel(main)
+	await _check_interact_choice(main)
+	await _check_daily_regrowth(main)
 	await _check_melee(main)
 	await _check_equipment_panel(main)
 	await _check_build_menu(main)
 	await _check_storage(main)
 	await _check_workbench(main)
+	await _check_weapon_skills(main)
 	await _check_progression(main)
 	await _check_inventory(main)
 	await _check_meeting(main)
@@ -80,6 +97,8 @@ func _ready() -> void:
 	await _frames(3)
 	_check(get_tree().paused and main.hud.game_over_panel.visible, "왕국 멸망 → 일시정지 + 멸망 화면")
 	_check(_heard.has("core_destroyed"), "왕국 멸망음은 일시정지 뒤에도 재생 경로가 살아 있음")
+	await get_tree().create_timer(SoundDB.BOSS_MUSIC_FADE_SECONDS + 0.1).timeout
+	_check(not main.boss_music._player.playing, "멸망 화면에서 보스 음악이 남지 않음")
 
 	print("SMOKE TEST %s (실패 %d)" % ["PASS" if _failures == 0 else "FAIL", _failures])
 	get_tree().quit(1 if _failures > 0 else 0)
@@ -152,18 +171,81 @@ func _check_audio(main: Main) -> void:
 	_check(_heard.is_empty(), "대시·부활처럼 빠른 위치 변화는 발소리로 세지 않음")
 
 
+func _check_boss_music(main: Main) -> void:
+	# 낮 배회 적 생성의 정상적인 난수 소비를 음악 검사와 분리한다.
+	var spawner_processing := main.spawner.is_physics_processing()
+	main.spawner.set_physics_process(false)
+	var music := main.boss_music
+	var voice := music._player
+	_check(not voice.playing and voice.stream.get_length() > 90.0 and voice.stream.loop,
+		"일반 플레이에는 보스 BGM이 없고 90초 이상 반복 스트림을 준비")
+	var rng_before := main.rng.state
+	var boss := Enemy.new().setup("venom_tyrant", true)
+	boss.position = main.player.global_position + Vector2(2000, 0)
+	main.get_node("Enemies").add_child(boss)
+	boss.set_physics_process(false)
+	await _frames(3)
+	_check(voice.playing and music._active, "보스가 등장하면 전투 BGM 재생 시작")
+	await get_tree().create_timer(SoundDB.BOSS_MUSIC_FADE_SECONDS + 0.1).timeout
+	_check(is_equal_approx(voice.volume_db, SoundDB.BOSS_MUSIC_VOLUME_DB), "보스 BGM은 설정 음량까지 페이드인")
+	voice.seek(voice.stream.get_length() - 0.1)
+	await get_tree().create_timer(0.35).timeout
+	_check(voice.playing and voice.get_playback_position() < 2.0, "보스 BGM 곡 끝에서 처음으로 반복")
+	var at := voice.get_playback_position()
+	await _frames(2)
+	_check(voice.get_playback_position() >= at, "같은 보스가 살아 있으면 곡을 매 프레임 다시 시작하지 않음")
+	get_tree().paused = true
+	await _frames(3)
+	var paused_at := voice.get_playback_position()
+	await get_tree().create_timer(0.2).timeout
+	_check(voice.stream_paused and absf(voice.get_playback_position() - paused_at) < 0.1,
+		"전략회의 일시정지 중 보스 BGM 재생 위치 유지")
+	get_tree().paused = false
+	await _frames(3)
+	_check(not voice.stream_paused and voice.playing, "전략회의 종료 후 같은 곡 재개")
+	main.spawner._on_day_started(main.day_night.day)
+	await _frames(2)
+	_check(voice.playing and music._active, "아침에도 보스가 남아 있으면 전투 음악 유지")
+	boss.queue_free()
+	await _frames(3)
+	_check(not music._active and voice.playing, "보스가 사라지면 음악을 바로 끊지 않고 페이드아웃")
+	# 페이드아웃 도중 다음 보스가 생겨도 이전 stop 콜백이 새 음악을 끊으면 안 된다.
+	var puppet := EnemyPuppet.new().setup("venom_tyrant", Vector2(2000, 0))
+	main.get_node("Enemies").add_child(puppet)
+	await _frames(3)
+	await get_tree().create_timer(SoundDB.BOSS_MUSIC_FADE_SECONDS + 0.1).timeout
+	_check(voice.playing and music._active, "참가자용 보스 표시도 음악을 재개하고 이전 종료 페이드는 취소")
+	puppet.queue_free()
+	await _frames(3)
+	await get_tree().create_timer(SoundDB.BOSS_MUSIC_FADE_SECONDS + 0.1).timeout
+	_check(not voice.playing and not music._active, "마지막 보스가 사라지면 페이드 뒤 실제 재생 정지")
+	_check(main.rng.state == rng_before, "보스 음악·반복·회의·전환은 게임 결과용 난수를 소비하지 않음")
+	var temporary := MusicPlayer.new()
+	main.add_child(temporary)
+	temporary.setup(SoundDB.BOSS_MUSIC, SoundDB.BOSS_MUSIC_VOLUME_DB, SoundDB.BOSS_MUSIC_FADE_SECONDS)
+	temporary.set_active(true)
+	var weak_voice: WeakRef = weakref(temporary._player)
+	temporary.queue_free()
+	await _frames(2)
+	_check(weak_voice.get_ref() == null, "음악 소유 노드 해제 시 재생기도 함께 해제")
+	main.spawner.set_physics_process(spawner_processing)
+
+
 func _check_weapon_art(main: Main) -> void:
 	var weapons := WeaponVisual.TEXTURE.get_image()
 	var projectile_art := Projectile.TEXTURE.get_image()
 	var effects := CombatEffect.TEXTURE.get_image()
-	var weapon_rows: Array[int] = []
+	var weapon_rows: Array[String] = []
+	var placeholders := 0
 	for id: String in ItemDB.ITEMS:
 		if not ItemDB.ITEMS[id].has("weapon") and id != "bomb_bag":
 			continue
-		_check(WeaponArtDB.WEAPONS.has(id), "%s 장비에는 무기 그림·모션이 정의됨" % id)
+		_check(WeaponArtDB.has_art(id), "%s 장비에는 무기 그림·모션이 정의됨 (그림이 없으면 계열 기본 그림)" % id)
 		if not WeaponArtDB.WEAPONS.has(id):
+			placeholders += 1
 			continue
-		var row: int = WeaponArtDB.WEAPONS[id]["row"]
+		var row := WeaponArtDB.weapon_texture(id).resource_path + str(WeaponArtDB.WEAPONS[id]["row"])
+		weapons = WeaponArtDB.weapon_texture(id).get_image()
 		var complete := not weapon_rows.has(row)
 		weapon_rows.append(row)
 		for frame in WeaponArtDB.WEAPON_FRAMES:
@@ -174,12 +256,15 @@ func _check_weapon_art(main: Main) -> void:
 		var first := weapons.get_region(Rect2i(WeaponArtDB.weapon_region(id, 1))).get_data()
 		var recovery := weapons.get_region(Rect2i(WeaponArtDB.weapon_region(id, 5))).get_data()
 		_check(complete and first != recovery, "%s의 8프레임은 고유 행에 있고 무기 끝이 잘리지 않으며 공격·회복 자세가 다름" % id)
-	for id: String in WeaponArtDB.PROJECTILES:
+	_check(placeholders == 0 and WeaponArtDB.WEAPONS.size() == 35, "무기 34종과 폭탄 주머니가 모두 자체 원본을 사용")
+	for id: String in WeaponArtDB.projectile_ids():
+		projectile_art = WeaponArtDB.projectile_texture(id).get_image()
 		var complete := true
 		for frame in WeaponArtDB.PROJECTILE_FRAMES:
 			complete = complete and not projectile_art.get_region(Rect2i(WeaponArtDB.projectile_region(id, frame * WeaponArtDB.PROJECTILE_FRAME_TIME + 0.001))).is_invisible()
 		_check(complete, "%s 투사체의 모든 움직임 칸이 존재" % id)
 	for id: String in WeaponArtDB.EFFECTS:
+		effects = WeaponArtDB.effect_texture(id).get_image()
 		var complete := true
 		for frame in WeaponArtDB.EFFECT_FRAMES:
 			complete = complete and not effects.get_region(Rect2i(WeaponArtDB.effect_region(id, float(frame) / WeaponArtDB.EFFECT_FRAMES))).is_invisible()
@@ -217,15 +302,17 @@ func _check_action_bar(main: Main) -> void:
 	var bar := main.hud._action_bar
 	var atlas := ActionBar.TEXTURE.get_image()
 	_check(atlas.get_size() == Vector2i(224, 72), "스킬바 아틀라스는 7종 아이콘과 4종 슬롯 상태를 포함")
-	var regions: Array[Rect2] = []
+	var regions: Array[String] = []
 	for skill_id: String in ActionBar.ICON_ORDER:
 		var region := ActionBar.icon_region(skill_id)
-		var picture := atlas.get_region(Rect2i(region))
-		_check(not picture.is_invisible() and not regions.has(region), "%s 스킬은 고유한 픽셀 아이콘을 표시" % skill_id)
-		regions.append(region)
+		var picture := ActionBar.icon_texture(skill_id).get_image().get_region(Rect2i(region))
+		var key := ActionBar.icon_texture(skill_id).resource_path + str(region)
+		_check(not picture.is_invisible() and not regions.has(key), "%s 스킬은 고유한 픽셀 아이콘을 표시" % skill_id)
+		regions.append(key)
 	_check(bar._get_tooltip(bar.skill_slot_rect(0).get_center()).contains("Space")
-		and bar._get_tooltip(bar.skill_slot_rect(1).get_center()).contains("자동 등록"),
-		"기본 대시와 미장착 슬롯은 각각 단축키·장비 자동 등록 방법을 안내")
+		and bar._get_tooltip(bar.skill_slot_rect(1).get_center()).contains("우클릭")
+		and bar._get_tooltip(bar.skill_slot_rect(ActionBar.FIXED_SLOTS).get_center()).contains("자동 등록"),
+		"대시·무기 스킬(우클릭)·미장착 슬롯은 각각 단축키·장비 자동 등록 방법을 안내")
 	var equipment := main.player.equipment
 	var original_bag := equipment.bag.duplicate()
 	var slots := ["weapon", "offhand", "armor", "charm"]
@@ -235,12 +322,20 @@ func _check_action_bar(main: Main) -> void:
 	for id: String in ["fire_staff", "bomb_bag", "guardian_armor", "life_charm"]:
 		equipment.add_to_bag(id)
 		equipment.equip(id)
-	_check(equipment.skill_bar().size() == 4
+	var last := ActionBar.FIXED_SLOTS + Equipment.MAX_SKILLS - 1
+	_check(equipment.skill_bar().size() == 3
 		and bar._get_tooltip(bar.skill_slot_rect(1).get_center()).contains("화염구")
-		and bar._get_tooltip(bar.skill_slot_rect(4).get_center()).contains("치유"),
-		"장비 착용 시 하단 1~4칸 설명은 실제 자동 등록 순서를 따름")
-	_check(bar.skill_slot_rect(1).position.x - bar.skill_slot_rect(0).end.x > ActionBar.GAP
-		and bar.skill_slot_rect(4).end.x <= bar.size.x, "대시를 장비 스킬과 구분하고 마지막 슬롯도 HUD 안에 배치")
+		and bar._get_tooltip(bar.skill_slot_rect(ActionBar.FIXED_SLOTS).get_center()).contains("폭탄")
+		and bar._get_tooltip(bar.skill_slot_rect(ActionBar.FIXED_SLOTS + 2).get_center()).contains("치유"),
+		"무기 스킬은 우클릭 칸, 나머지 장비 스킬은 1~3칸에 실제 자동 등록 순서대로")
+	_check(bar.skill_slot_rect(ActionBar.FIXED_SLOTS).position.x - bar.skill_slot_rect(1).end.x > ActionBar.GAP
+		and bar.skill_slot_rect(last).end.x <= bar.size.x, "대시·무기 스킬을 장비 스킬과 구분하고 마지막 슬롯도 HUD 안에 배치")
+	# 우클릭 무기 스킬 (D-027): 화염 지팡이의 화염구만 쿨타임에 들어간다.
+	# 날아간 화염구가 나무를 맞혀 채집 경험치(20% 확률)를 주면 뒤 검사가 흔들리므로 월드는 건드리지 않게 쏜다
+	main.player.hits_world = false
+	main.player.use_weapon_skill()
+	main.player.hits_world = true
+	_check(not equipment.is_ready("fire_staff") and equipment.is_ready("bomb_bag"), "우클릭으로 무기 스킬(화염구)만 시전")
 	for i in slots.size():
 		if original_items[i].is_empty():
 			equipment.unequip(slots[i])
@@ -289,6 +384,55 @@ func _check_status_hud(main: Main) -> void:
 	main.day_night.phase = DayNight.Phase.DAY
 	main.day_night.time = previous_time
 	hud._process(0.0)
+
+
+func _check_progression_hud(main: Main) -> void:
+	var hud := main.hud._progression_hud
+	var progression := main.player.progression
+	var before := [progression.level, progression.xp, progression.points, progression.ranks.duplicate()]
+	var art := ProgressionHud.TEXTURE.get_image()
+	var regions_valid := art.get_size() == Vector2i(128, 64)
+	for region: Rect2 in [ProgressionHud.BADGE, ProgressionHud.BADGE_LIT, ProgressionHud.BAR, ProgressionHud.FILL]:
+		regions_valid = regions_valid and not art.get_region(Rect2i(region)).is_invisible()
+	_check(regions_valid, "레벨 배지·성장 강조·경험치바 픽셀 아틀라스가 존재")
+	progression.lose_level_progress()
+	progression.add_xp(progression.xp_to_next() - 1)
+	await get_tree().create_timer(ProgressionHud.GAIN_SECONDS + 0.05).timeout
+	_check(hud._xp == progression.xp and is_equal_approx(hud._ratio, float(progression.xp) / progression.xp_to_next()),
+		"경험치 획득 후 HUD 수치·진행바가 실제 이번 레벨 비율까지 채워짐")
+	var level_before := progression.level
+	var points_before := progression.points
+	progression.add_xp(1)
+	_check(hud._level == level_before + 1 and hud._points == points_before + 1 and hud._flash > 0.0 and hud._target_ratio == 0.0,
+		"레벨업 시 배지·포인트·다음 레벨의 경험치바를 함께 갱신하고 강조")
+	progression.add_xp(progression.xp_to_next() + Balance.xp_to_next_level(progression.level + 1) + 3)
+	_check(hud._level == progression.level and hud._xp == 3 and hud._points == progression.points,
+		"한 번에 여러 레벨이 올라도 최종 레벨·남은 경험치·포인트가 정확")
+	var preserved_level := progression.level
+	var preserved_points := progression.points
+	progression.lose_level_progress()
+	_check(hud._ratio == 0.0 and hud._xp == 0 and hud._level == preserved_level and hud._points == preserved_points,
+		"사망 시 이번 경험치바만 즉시 비우고 레벨·포인트 표시는 유지")
+	var learned := progression.learn("sword_mastery")
+	_check(learned == "" and hud._points == preserved_points - 1 and hud._points_button.text.contains("%d점" % progression.points),
+		"패시브 포인트 소비도 HUD 버튼 수량에 즉시 반영")
+	hud._points_button.pressed.emit()
+	_check(main.hud.passive_panel.visible, "HUD 포인트 버튼이 기존 K 패시브 창을 엶")
+	main.hud.passive_panel.hide()
+	# headless의 가상 마우스 위치는 입력 이벤트로 이동하지 않으므로 같은 히트테스트에 좌표를 주입한다.
+	_check(main.hud.is_pointer_over_status(hud.get_global_rect().get_center()),
+		"경험치 HUD 위의 클릭은 월드 기본 공격을 차단")
+	var bounds := hud.get_global_rect()
+	_check(bounds.position.x >= 0.0 and bounds.end.x <= get_viewport().get_visible_rect().size.x
+		and main.hud._status_panel.get_global_rect().encloses(bounds) and bounds.end.y < 300.0,
+		"축소된 경험치 패널은 화면 상단 상태창 안에 배치")
+	progression.level = before[0]
+	progression.xp = before[1]
+	progression.points = before[2]
+	progression.ranks = before[3]
+	progression.changed.emit()
+	await get_tree().create_timer(ProgressionHud.LEVEL_FLASH_SECONDS + 0.05).timeout
+	_check(hud._flash == 0.0, "레벨업 강조는 잠시 후 사라져 상시 번쩍이지 않음")
 
 
 ## 실제 I 창에서 장착·해제·재료 스택·호버 설명·닫기가 함께 동작해야 한다.
@@ -400,16 +544,17 @@ func _check_building_art(main: Main) -> void:
 
 
 func _check_item_art(main: Main) -> void:
-	var art := ItemArtDB.ICONS.get_image()
-	var used: Array[Rect2] = []
-	var complete := ItemArtDB.ORDER.size() == ItemDB.ITEMS.size()
+	var used: Array[String] = []
+	var complete := true
 	for id: String in ItemDB.ITEMS:
 		var icon := ItemArtDB.icon(id)
-		complete = complete and icon != null
-		if icon != null:
-			complete = complete and not used.has(icon.region) and not art.get_region(Rect2i(icon.region)).is_invisible()
-			used.append(icon.region)
-	_check(complete, "장비 15종 전체에 고유 아이콘이 있음")
+		if icon == null:
+			complete = false
+			continue
+		var key := icon.atlas.resource_path + str(icon.region)
+		complete = complete and not used.has(key) and not icon.atlas.get_image().get_region(Rect2i(icon.region)).is_invisible()
+		used.append(key)
+	_check(complete and used.size() == ItemDB.ITEMS.size(), "장비 %d종 전체에 서로 다른 실제 외형 아이콘이 있음" % used.size())
 	var worn := EquipmentVisual.TEXTURE.get_image()
 	var poses_ok := true
 	for row in ItemArtDB.WORN_ORDER.size():
@@ -462,7 +607,8 @@ func _check_passive_effects(main: Main) -> void:
 	for effect in effects:
 		if is_instance_valid(effect):
 			expired = false
-	_check(expired and main.player.hp == hp_before and main.player.progression.xp == xp_before, "패시브 그림은 수명 뒤 제거되고 체력·경험치를 바꾸지 않음")
+	_check(expired and main.player.hp == hp_before and main.player.progression.xp == xp_before,
+		"패시브 그림은 수명 뒤 제거되고 체력·경험치를 바꾸지 않음 (남은 그림 %s, 체력 %s → %s, 경험치 %d → %d)" % [not expired, hp_before, main.player.hp, xp_before, main.player.progression.xp])
 	var admitted := 0
 	for i in PassiveEffectDB.MAX_VISIBLE + 12:
 		if CombatEffect.spawn(get_tree(), "passive_fortify", main.player.global_position, 1.0) != null:
@@ -521,36 +667,33 @@ func _check_passive_effects(main: Main) -> void:
 
 ## 모든 적의 그림이 존재하고 움직임·피격 표시가 기존 충돌과 피해 판정을 유지해야 한다.
 func _check_enemy_art(main: Main) -> void:
-	var image := Enemy.SPRITE_TEXTURE.get_image()
-	# 보스 7종은 보스 행 하나를 색(tint)만 바꿔 함께 쓴다 (D-021, 임시). 일반 적은 종류마다 자기 행이 있어야 한다
-	var boss_row: int = EnemyDB.TYPES["boss"]["sprite_row"]
-	var row_count := 0
-	for id: String in EnemyDB.TYPES:
-		if not EnemyDB.TYPES[id].get("is_boss", false) or id == "boss":
-			row_count += 1
-	var atlas_ok := image.get_size() == Vector2i(Enemy.SPRITE_SIZE * Enemy.ANIMATION_FRAMES, Enemy.SPRITE_SIZE * row_count)
-	var rows: Dictionary = {}
+	var normal := Enemy.SPRITE_TEXTURE.get_image()
+	var bosses := Enemy.BOSS_TEXTURE.get_image()
+	var atlas_ok := normal.get_size() == Vector2i(256, 512) and bosses.get_size() == Vector2i(1024, 896)
+	var rows := {}
+	var boss_shapes: Array[PackedByteArray] = []
 	var motion_ok := true
 	var rules_ok := true
+	var boss_frames_ok := true
 	for id: String in EnemyDB.TYPES:
 		var stats: Dictionary = EnemyDB.TYPES[id]
-		var row: int = stats["sprite_row"]
-		var top: int = stats["sprite_top"]
-		var shared_boss_art: bool = stats.get("is_boss", false) and id != "boss"
-		if shared_boss_art:
-			atlas_ok = atlas_ok and row == boss_row
-		elif row < 0 or row >= row_count or rows.has(row):
-			atlas_ok = false
-			continue
-		rows[row] = true
-		for frame in Enemy.ANIMATION_FRAMES:
-			var painted := false
-			for y in Enemy.SPRITE_SIZE:
-				for x in Enemy.SPRITE_SIZE:
-					if image.get_pixel(frame * Enemy.SPRITE_SIZE + x, row * Enemy.SPRITE_SIZE + y).a > 0.0:
-						painted = true
-						atlas_ok = atlas_ok and y >= top
-			atlas_ok = atlas_ok and painted
+		var is_boss: bool = stats.get("is_boss", false)
+		var image := bosses if is_boss else normal
+		var row_key := "%s:%d" % ["boss" if is_boss else "normal", stats["sprite_row"]]
+		atlas_ok = atlas_ok and not rows.has(row_key)
+		rows[row_key] = true
+		var poses: Array[PackedByteArray] = []
+		for frame in Enemy.animation_frames(id):
+			var art := image.get_region(Rect2i(Enemy.sprite_region(id, frame)))
+			var bounds := art.get_used_rect()
+			atlas_ok = atlas_ok and bounds.has_area() and bounds.position.y >= int(stats["sprite_top"])
+			if is_boss:
+				boss_frames_ok = boss_frames_ok and bounds.position.x > 0 and bounds.position.y > 0 and bounds.end.x < Enemy.BOSS_SPRITE_SIZE and bounds.end.y < Enemy.BOSS_SPRITE_SIZE
+				boss_frames_ok = boss_frames_ok and not poses.has(art.get_data())
+			poses.append(art.get_data())
+		if is_boss:
+			atlas_ok = atlas_ok and not stats.has("tint") and not boss_shapes.has(poses[0])
+			boss_shapes.append(poses[0])
 		var enemy := Enemy.new().setup(id, true)
 		main.get_node("Enemies").add_child(enemy)
 		enemy.set_physics_process(false)
@@ -562,19 +705,61 @@ func _check_enemy_art(main: Main) -> void:
 		motion_ok = motion_ok and not enemy._facing_left
 		enemy.velocity = Vector2.ZERO
 		enemy._update_animation(0.13)
-		if id not in Enemy.IDLE_ANIMATED and not enemy.is_boss():
+		if id not in Enemy.IDLE_ANIMATED and not is_boss:
 			motion_ok = motion_ok and enemy._animation_frame == 0
 		var collider := enemy.get_child(0) as CollisionShape2D
 		rules_ok = rules_ok and is_equal_approx((collider.shape as CircleShape2D).radius, stats["radius"])
 		enemy.take_damage(1.0)
 		rules_ok = rules_ok and is_equal_approx(enemy.hp, float(stats["hp"]) - 1.0) and enemy._flash > 0.0
+		if is_boss:
+			enemy._animation_time = 0.0
+			enemy.hp = enemy.max_hp * 0.1
+			enemy._update_animation(0.4)
+			motion_ok = motion_ok and enemy._animation_frame > int(0.4 * Enemy.ANIMATION_FPS)
+			var puppet := EnemyPuppet.new().setup(id, enemy.position)
+			main.get_node("Enemies").add_child(puppet)
+			puppet.apply(enemy.position, 0.1, 7, true, true)
+			boss_frames_ok = boss_frames_ok and puppet._frame == 7 and puppet._flashing and puppet._facing_left
+			boss_frames_ok = boss_frames_ok and Enemy.sprite_texture(id) == Enemy.BOSS_TEXTURE and Enemy.sprite_region(id, puppet._frame).size == Vector2.ONE * 128
+			puppet.queue_free()
 		enemy.queue_free()
-	_check(atlas_ok, "적 그림 %d행의 모든 프레임과 체력바용 그림 높이가 유효 (보스는 한 행 공유)" % row_count)
-	_check(motion_ok, "적은 이동 시 프레임·좌우 방향이 바뀌고 정지 시 걷기를 멈춤")
+	_check(atlas_ok and boss_shapes.size() == 7, "일반 적 7종·보스 7종 고유 행/실루엣과 체력바 높이가 유효")
+	_check(boss_frames_ok, "보스별 8프레임은 서로 다르고 가장자리 잘림 없으며 원격 7번 프레임·반전·피격도 유효")
+	_check(motion_ok, "적 이동·좌우·정지와 보스 호흡·분노 시 빠른 움직임이 반영")
 	_check(rules_ok, "적 그래픽 교체 후에도 종류별 충돌·피해·피격 표시가 유지")
 
 
 ## 체력바 그림 교체가 표시 수명이나 실제 체력을 바꾸면 안 된다.
+## Y 정렬은 같은 Z 안에서만 동작하고, 중간 컨테이너가 끊기면 그 아래가 한 덩어리가 된다.
+func _check_depth_sort(main: Main) -> void:
+	var enemies := main.get_node("Enemies") as Node2D
+	_check(main.y_sort_enabled and main.world.y_sort_enabled and main.world.object_layer.y_sort_enabled
+		and main.kingdom.y_sort_enabled and enemies.y_sort_enabled,
+		"생성물 타일·건물·적·플레이어를 공통 Y 정렬로 연결")
+	_check(main.player.z_index == main.world.object_layer.z_index and main.kingdom.core.z_index == main.player.z_index
+		and not main.player.y_sort_enabled and not main.kingdom.core.y_sort_enabled,
+		"몸·무기·장비는 기준점 하나로 묶고 성·생성물과 같은 Z에서 비교")
+	_check(main.player.weapon_visual.get_index() > main.player._sprite.get_index()
+		and main.player.weapon_visual.z_index == main.player._sprite.z_index, "무기는 몸·착용 장비 앞에 그리되 물체 간 Y 정렬을 유지")
+	var first := Building.new().setup("arrow_tower", Vector2i.ZERO)
+	var second := Building.new().setup("flame_tower", Vector2i.ZERO)
+	main.kingdom.add_child(first)
+	main.kingdom.add_child(second)
+	first.position = main.kingdom.core.position + Vector2(500, 16)
+	second.position = first.position - Vector2(0, 32)
+	_check(first.get_parent() == second.get_parent() and (first.get_parent() as Node2D).y_sort_enabled
+		and first.z_index == second.z_index and first.z_index == main.kingdom.core.z_index
+		and not first.y_sort_enabled and not second.y_sort_enabled,
+		"추가 순서와 무관하게 건물끼리·건물과 성도 같은 Y 정렬 사용")
+	first.queue_free()
+	second.queue_free()
+	_check(main.world.terrain_layer.z_index < main.player.z_index
+		and (main.get_node("Projectiles") as Node2D).z_index > main.player.z_index
+		and (main.get_node("Effects") as Node2D).z_index > main.player.z_index
+		and main.build_mode.z_index > main.player.z_index,
+		"바닥은 뒤에, 공격 연출·설치 미리보기는 물체 위에 유지")
+
+
 func _check_health_bars(main: Main) -> void:
 	var world := main.world
 	var cell := _find_tree(world)
@@ -682,6 +867,306 @@ func _check_harvest(main: Main) -> void:
 	_check(world.data.get_object(tree_cell) == WorldData.Obj.NONE and _wood(main) > wood_before,
 		"투사체로 나무 채집 (나무 %d → %d)" % [wood_before, _wood(main)])
 	main.spawner.set_physics_process(true)
+
+
+## 벽을 뺀 건물(문·공성탑·생활 건물)은 플레이어만 지나가고 적은 막힌다 (D-025·D-036). 왼쪽 칸에서 건물 칸 가운데로 움직여 본다
+func _check_passable_buildings(main: Main) -> void:
+	var kingdom := main.kingdom
+	var world := main.world
+	var enemy := Enemy.new().setup("slime", false)
+	enemy.position = main.player.global_position + Vector2(0, 400)
+	enemy.set_physics_process(false)
+	main.get_node("Enemies").add_child(enemy)
+	var built: Array[Vector2i] = []
+	kingdom.add_resources({"wood": 40, "stone": 40})  # 앞 검사에서 창고를 썼어도 네 건물을 지을 수 있게
+	for id: String in ["wood_door", "campfire", "arrow_tower", "stone_wall"]:
+		var cell := World.NO_CELL
+		for y in range(-4, 5):
+			for x in range(-4, 5):
+				var candidate := kingdom.core_cell() + Vector2i(x, y)
+				if cell == World.NO_CELL and not kingdom.is_occupied(candidate) and not kingdom.is_occupied(candidate + Vector2i.LEFT) \
+						and world.data.is_walkable(candidate + Vector2i.LEFT) and kingdom.build(candidate, id, main.player.global_position) == "":
+					cell = candidate
+		if cell == World.NO_CELL:
+			_check(false, "%s 통과 검사용 칸을 찾지 못함" % id)
+			continue
+		built.append(cell)
+		await get_tree().physics_frame
+		await get_tree().physics_frame
+		var start := Transform2D(0.0, world.cell_center(cell) - Vector2(Balance.TILE, 0))
+		var motion := Vector2(Balance.TILE, 0)
+		var player_blocked := main.player.test_move(start, motion)
+		var enemy_blocked := enemy.test_move(start, motion)
+		if id == "stone_wall":
+			_check(player_blocked and enemy_blocked, "벽은 플레이어와 적 모두 막음")
+		else:
+			_check(not player_blocked and enemy_blocked, "%s: 플레이어는 지나가고 적은 막힘" % BuildingDB.TYPES[id]["name"])
+	for cell in built:
+		kingdom.demolish(cell)
+	enemy.queue_free()
+	await _frames(1)
+
+
+## 낮의 배회 적은 왕국 영토에 들어오지 않고 영토 안의 플레이어를 노리지 않는다. 밤에는 풀린다 (D-026)
+func _check_daytime_kingdom(main: Main) -> void:
+	var player := main.player
+	var spawner := main.spawner
+	var core := main.kingdom.core.global_position
+	var edge := (Balance.TERRITORY_RADIUS + 0.5) * Balance.TILE
+	spawner.set_physics_process(false)
+	for enemy in get_tree().get_nodes_in_group("enemies"):
+		enemy.queue_free()
+	await _frames(2)
+	# 경계 안팎 몇 칸이 모두 걸을 수 있는 방향을 고른다 (물·나무에 막혀 결과가 흐려지지 않게)
+	var direction := Vector2.ZERO
+	for i in 16:
+		var candidate := Vector2.from_angle(TAU * i / 16.0)
+		var clear := true
+		for step in range(-3, 4):
+			var cell := main.world.cell_at(core + candidate * (edge + step * Balance.TILE))
+			clear = clear and main.world.data.is_walkable(cell) and main.world.data.get_object(cell) == WorldData.Obj.NONE and not main.kingdom.is_occupied(cell)
+		if clear:
+			direction = candidate
+			break
+	if direction == Vector2.ZERO:
+		_check(false, "낮 왕국 검사용 빈 경계를 찾지 못함")
+		spawner.set_physics_process(true)
+		return
+	var position_before := player.global_position
+	player.global_position = core + direction * (edge - 2.0 * Balance.TILE)
+	var hp_before := player.hp
+	var outside := Enemy.new().setup("slime", false)
+	var inside := Enemy.new().setup("slime", false)
+	spawner._spawn("slime", core + direction * (edge + 2.0 * Balance.TILE), false, 1.0)
+	var spawned: Enemy = main.get_node("Enemies").get_child(-1)
+	_check(spawned.avoids_kingdom, "낮에 생긴 배회 적은 왕국을 피함")
+	spawned.queue_free()
+	outside.avoids_kingdom = true
+	inside.avoids_kingdom = true
+	outside.position = core + direction * (edge + 2.0 * Balance.TILE)
+	inside.position = core + direction * (edge - 1.0 * Balance.TILE)
+	main.get_node("Enemies").add_child(outside)
+	main.get_node("Enemies").add_child(inside)
+	var entered := false
+	for i in 60:
+		await get_tree().physics_frame
+		entered = entered or outside.in_kingdom(outside.global_position)
+	_check(not entered and outside._target == null and player.hp == hp_before,
+		"낮에는 영토 안 플레이어를 노리지 않고 경계 밖에 머묾 (체력 %d → %d)" % [hp_before, player.hp])
+	_check(not inside.in_kingdom(inside.global_position), "낮에 영토 안에 있던 배회 적은 밖으로 밀려남")
+	spawner._on_night_started(main.day_night.day)
+	_check(not outside.avoids_kingdom, "밤이 되면 배회 적도 영토 안까지 쫓아옴")
+	await get_tree().physics_frame
+	_check(outside._target == player, "밤에는 영토 안 플레이어를 다시 노림")
+	spawner._on_day_started(main.day_night.day)
+	_check(outside.avoids_kingdom, "아침이 되면 다시 왕국을 피함")
+	outside.queue_free()
+	inside.queue_free()
+	player.global_position = position_before
+	spawner.set_physics_process(true)
+	await _frames(1)
+
+
+## 아침 재생(D-035): 부서진 나무·바위·광석은 아침에 처음 총량까지 다시 자라고, 바이옴 서식 몬스터도 모자란 만큼 채워진다
+func _check_daily_regrowth(main: Main) -> void:
+	var world := main.world
+	var data := world.data
+	var targets := data.resource_targets
+	var broken := 0
+	for i in data.objects.size():
+		if broken >= 30:
+			break
+		var obj := data.objects[i]
+		if obj in World.HARVESTABLE:
+			var cell := Vector2i(i % data.size.x, i / data.size.x)
+			if not main.kingdom.in_territory(cell):
+				world.damage_object(cell, 99999.0, World.NOBODY)
+				broken += 1
+	var before := WorldGenerator.count_resources(data)
+	var short := 0
+	for key: Vector2i in targets:
+		short += targets[key] - before.get(key, 0)
+	var grown := main.regrow_resources()
+	var after := WorldGenerator.count_resources(data)
+	_check(broken == 30 and short >= 30 and grown == short and after == targets,
+		"아침 재생: 부서진 %d개만큼 같은 바이옴에 다시 자라 처음 총량으로 (%d개 자람)" % [short, grown])
+	var spawner := main.spawner
+	for enemy in get_tree().get_nodes_in_group("enemies"):
+		enemy.queue_free()
+	await _frames(2)
+	var refilled := spawner.refill_residents()
+	await _frames(2)
+	var counts := spawner.resident_counts()
+	var expected := 0
+	for terrain: int in spawner.resident_targets():
+		expected += spawner.resident_targets()[terrain]
+	var placed_ok := true
+	for enemy: Enemy in get_tree().get_nodes_in_group("enemies"):
+		placed_ok = placed_ok and enemy.home.is_finite() and data.get_terrain(world.cell_at(enemy.home)) == enemy.home_terrain \
+			and not main.kingdom.in_territory(world.cell_at(enemy.global_position)) \
+			and enemy.global_position.distance_to(main.player.global_position) >= Balance.RESIDENT_PLAYER_GAP
+	_check(refilled == expected and counts == spawner.resident_targets() and placed_ok and spawner.resident_targets().size() == 6,
+		"바이옴 6곳에 서식 몬스터 %d마리: 자기 바이옴·영토 밖·플레이어와 떨어진 곳" % refilled)
+	_check(spawner.refill_residents() == 0, "이미 다 차 있으면 아침에도 더 생기지 않음")
+	var resident: Enemy = get_tree().get_nodes_in_group("enemies")[0]
+	resident.global_position = resident.home + Vector2(Balance.RESIDENT_LEASH + 6.0 * Balance.TILE, 0)
+	var far := resident.global_position.distance_to(resident.home)
+	for i in 20:
+		await get_tree().physics_frame
+	_check(is_instance_valid(resident) and resident.global_position.distance_to(resident.home) < far,
+		"서식지에서 멀어진 몬스터는 사라지지 않고 집으로 돌아감")
+	for enemy in get_tree().get_nodes_in_group("enemies"):
+		enemy.queue_free()
+	await _frames(2)
+
+
+## E 상호작용(D-031): 주변에 하나면 그것, 여럿이면 마우스에 가까운 것. 열릴 대상 위에 E 안내가 뜬다
+func _check_interact_choice(main: Main) -> void:
+	var kingdom := main.kingdom
+	var player := main.player
+	var position_before := player.global_position
+	var far := kingdom.core.global_position + Vector2(0, 40 * Balance.TILE)
+	player.global_position = kingdom.core.global_position + Vector2(0, 3 * Balance.TILE)
+	main.mouse_override = far
+	await _frames(1)
+	var only := main.interact_target(far)
+	_check(main.interactables().size() == 1 and only.get("kind", "") == "core", "주변에 왕국 핵 하나뿐이면 마우스가 멀어도 핵이 열림")
+	_check(main._prompt.visible and main._prompt._target.get("kind", "") == "core", "열릴 대상 위에 E 안내가 보임")
+	var cell := _free_cell_near(main, main.world.cell_at(player.global_position), 1)
+	kingdom.add_resources({"wood": 30})
+	_check(kingdom.build(cell, "gear_chest", player.global_position) == "", "E 선택 검사용 장비 상자")
+	await _frames(1)
+	var chest_at := main.world.cell_center(cell)
+	var near_chest := main.interact_target(chest_at)
+	var near_core := main.interact_target(kingdom.core.global_position)
+	_check(main.interactables().size() == 2 and near_chest.get("kind", "") == "storage" and near_core.get("kind", "") == "core",
+		"여럿이면 마우스를 올린 쪽(상자·핵)이 열림")
+	main.hud.kingdom_panel.hide()
+	main.mouse_override = chest_at
+	main._interact()
+	_check(main.hud.storage_panel.visible and not main.hud.kingdom_panel.visible, "E를 누르면 마우스를 올린 장비 상자가 열림")
+	main.hud.storage_panel.hide()
+	kingdom.demolish(cell)
+	main.mouse_override = Vector2.INF
+	player.global_position = position_before
+	await _frames(1)
+
+
+## 왕국 핵 창(D-027): 핵 옆 E로 열리고, 영토 확장은 비용을 내고 건설 범위·적의 낮 경계를 함께 넓힌다
+func _check_kingdom_panel(main: Main) -> void:
+	var kingdom := main.kingdom
+	var player := main.player
+	var stock_before := kingdom.stock.duplicate()
+	var position_before := player.global_position
+	player.global_position = kingdom.core.global_position + Vector2(0, 2.5 * Balance.TILE)
+	await _frames(1)
+	var interact := InputEventAction.new()
+	interact.action = "interact"
+	interact.pressed = true
+	Input.parse_input_event(interact)
+	await _frames(2)
+	var panel := main.hud.kingdom_panel
+	_check(panel.visible and not player.attack_enabled, "핵 옆에서 E로 왕국 핵 창이 열리고 공격이 멈춤")
+	var art := KingdomPanel.ICONS.get_image()
+	var icons_ok := art.get_size() == Vector2i(256, 64)
+	for i in 4:
+		icons_ok = icons_ok and not art.get_region(Rect2i(i * 48, 0, 48, 48)).is_invisible()
+	_check(icons_ok and panel._rows.size() == 4 and panel._health.get_theme_stylebox("fill") is StyleBoxTexture,
+		"왕국 집무실은 네 전용 픽셀 아이콘·성채 체력 그래픽·네 운영 카드를 표시")
+	_check((panel._rows["repair"]["button"] as Button).disabled and panel._preview.radius == kingdom.territory_radius(),
+		"성채가 멀쩡하면 수리 비활성·영토 그림은 실제 반지름을 반영")
+	var outside := kingdom.core_cell() + Vector2i(Balance.TERRITORY_RADIUS + 2, 0)
+	kingdom.stock = {}
+	player.inventory.clear()
+	panel._refresh()
+	var territory: Dictionary = panel._rows["territory"]
+	_check((territory["button"] as Button).disabled and kingdom.expand_territory(player.global_position, player.inventory).contains("필요"),
+		"재료가 없으면 영토 확장 불가")
+	kingdom.add_resources(Balance.TERRITORY_UPGRADES[0])
+	panel._refresh()
+	(territory["button"] as Button).pressed.emit()
+	_check(kingdom.territory_level == 1 and kingdom.in_territory(outside) and kingdom.in_territory_at(kingdom.world.cell_center(outside))
+			and kingdom.stock.get("tough_hide", 0) == 0,
+		"영토 확장: 비용을 내고 반지름 %d칸, 건설 범위와 적의 경계가 함께 넓어짐" % kingdom.territory_radius())
+	_check((territory["cost"] as GridContainer).get_child_count() == Balance.TERRITORY_UPGRADES[1].size()
+		and panel._preview.level == 1, "확장 후 다음 단계 재료 아이콘과 성채의 영토 그림을 갱신")
+	kingdom.core.take_damage(100.0)
+	kingdom.add_resources(Balance.REPAIR_COST)
+	panel._refresh()
+	var hp_before := kingdom.core.hp
+	(panel._rows["repair"]["button"] as Button).pressed.emit()
+	_check(kingdom.core.hp > hp_before and is_equal_approx(panel._health.value, kingdom.core.hp),
+		"왕국 수리 카드도 기존 명령으로 체력을 회복하고 그래픽을 갱신")
+	kingdom.core.repair(kingdom.core.max_hp)
+	_check(kingdom.expand_territory(kingdom.core.global_position + Vector2(0, 10 * Balance.TILE), null).contains("핵"),
+		"핵에서 멀면 영토 확장 불가")
+	panel.hide()
+	# 다른 검사는 기본 영토를 가정하므로 되돌린다
+	kingdom.territory_level = 0
+	kingdom.queue_redraw()
+	kingdom.stock = stock_before
+	player.global_position = position_before
+	await _frames(1)
+
+
+## 무기 트리 스킬·효과 (D-028): 기절, 반격 자세, 번개 연쇄, 2차 폭발, 관통 강화
+func _check_weapon_skills(main: Main) -> void:
+	var player := main.player
+	if player.is_dead:
+		player._respawn()
+	player.global_position = player.spawn_point
+	main.spawner.set_physics_process(false)
+	for enemy in get_tree().get_nodes_in_group("enemies"):
+		enemy.queue_free()
+	await _frames(2)
+	var spawn := func(offset: Vector2) -> Enemy:
+		var enemy := Enemy.new().setup("brute", false)
+		enemy.position = player.global_position + offset
+		main.get_node("Enemies").add_child(enemy)
+		enemy.set_physics_process(false)  # 움직이거나 때리지 않게 세워 둔다
+		return enemy
+	var near: Enemy = spawn.call(Vector2(60, 0))
+	await _frames(1)
+	player.blast(100.0, 1.0, {"slow_factor": 0.0, "slow_time": 1.0})
+	_check(near._slow_time > 0.0 and near._slow_factor == 0.0, "흑요석 대검의 내려찍기: 맞은 적이 기절(속도 0)")
+
+	var counter: Dictionary = ItemDB.ITEMS["guard_sword"]["skill"]
+	var hp_before := near.hp
+	var player_hp := player.hp
+	player._invuln_time = 0.0  # 부활 직후 무적이면 막은 횟수로 세지 않는다
+	player.activate_counter(counter)
+	player.take_damage(10.0)
+	player.take_damage(10.0)
+	await get_tree().create_timer(counter["duration"] + 0.2).timeout
+	var expected: float = counter["damage"] + counter["per_block"] * 2
+	_check(player.hp == player_hp and is_equal_approx(hp_before - near.hp, expected),
+		"수호검의 반격 자세: 막은 2번만큼 강해진 충격파 (%d 피해)" % (hp_before - near.hp))
+	near.queue_free()
+
+	var first: Enemy = spawn.call(Vector2(80, 0))
+	var second: Enemy = spawn.call(Vector2(80, 70))
+	var third: Enemy = spawn.call(Vector2(80, 140))
+	await _frames(2)
+	var full := first.max_hp
+	player.hits_world = false
+	player.fire({"direction": Vector2.RIGHT, "damage": 10.0, "speed": 900.0, "lifetime": 0.3, "chain": 2})
+	await get_tree().create_timer(0.25).timeout
+	_check(first.hp < full and second.hp < full and third.hp < full, "번개 지팡이: 맞은 적에서 근처 적 2마리로 연쇄")
+	for enemy: Enemy in [first, second, third]:
+		enemy.queue_free()
+
+	var target: Enemy = spawn.call(Vector2(0, 50))
+	await _frames(2)
+	var target_full := target.max_hp
+	player.fire({"direction": Vector2.DOWN, "damage": 20.0, "speed": 0.0, "lifetime": 0.01, "explode_radius": 50.0, "second_blast": true})
+	await get_tree().create_timer(0.15).timeout
+	var after_first := target.hp
+	await get_tree().create_timer(Projectile.SECOND_BLAST_DELAY + 0.2).timeout
+	_check(after_first < target_full and target.hp < after_first, "흑요석 공성 석궁: 폭발 볼트가 잠깐 뒤 한 번 더 터짐")
+	target.queue_free()
+	player.hits_world = true
+	main.spawner.set_physics_process(true)
+	await _frames(1)
 
 
 ## 시작 무기(근거리)로 좌클릭하면 앞의 적이 맞고, 휘두르기로 나무도 채집되는지 확인
@@ -823,12 +1308,14 @@ func _check_storage(main: Main) -> void:
 		"멀리서는 꺼낼 수 없음")
 	_check(kingdom.demolish(cell) != "" and kingdom.buildings.has(cell), "장비가 든 상자는 철거할 수 없음")
 
+	main.mouse_override = main.world.cell_center(cell)  # 핵·제작대도 가까우면 마우스를 올린 상자가 열린다 (D-031)
 	var interact := InputEventAction.new()
 	interact.action = "interact"
 	interact.pressed = true
 	Input.parse_input_event(interact)
 	await _frames(2)
 	_check(main.hud.storage_panel.visible and not player.attack_enabled, "E로 장비 상자 창이 열리고 공격이 꺼짐")
+	main.mouse_override = Vector2.INF
 	main.hud.storage_panel.hide()
 
 	error = kingdom.take_item(cell, player.equipment, "chain_mail", player.global_position)
@@ -864,19 +1351,64 @@ func _check_workbench(main: Main) -> void:
 	kingdom.add_resources({"copper": 20, "tough_hide": 10, "venom_sting": 10})
 	_check(kingdom.craft("chain_mail", player.global_position, player.inventory, player.equipment).contains("1단계"), "단계가 모자라면 제작 불가")
 
+	_check(kingdom.upgrade_workbench(kingdom.core.global_position + Vector2(0, 10 * Balance.TILE), player.inventory).contains("핵"),
+		"제작대 강화는 왕국 핵 근처에서만 (D-027)")
 	error = kingdom.upgrade_workbench(player.global_position, player.inventory)
-	_check(error == "" and kingdom.workbench_tier() == 1, "희귀 재료로 제작대 1단계 업그레이드 %s" % error)
+	_check(error == "" and kingdom.workbench_tier() == 1, "몬스터 재료로 핵에서 제작대 1단계 강화 %s" % error)
 	var upgraded_region := Building.sprite_region("workbench", kingdom.workbench_tier())
 	_check(upgraded_region != Building.sprite_region("workbench", 0), "제작대 업그레이드 후 단계별 그림으로 전환")
 	_check(kingdom.craft("chain_mail", player.global_position, player.inventory, player.equipment) == "", "1단계가 되면 사슬 갑옷 제작")
+	# 무기 강화 (D-028): 이전 무기를 소모하고, 들고 있었으면 손에 든 채로 바뀐다
+	if player.equipment.item_in("weapon") != "rusty_sword":
+		player.equipment.add_to_bag("rusty_sword")
+		player.equipment.equip("rusty_sword")
+	kingdom.add_resources({"hardwood": 20, "copper": 20, "tough_hide": 10, "venom_sting": 10})
+	kingdom.discover({"hardwood": 1, "copper": 1, "tough_hide": 1, "venom_sting": 1})
+	_check(kingdom.craft("siege_crossbow", player.global_position, player.inventory, player.equipment).contains("나무 석궁"),
+		"강화할 이전 무기(나무 석궁)가 없으면 공성 석궁을 만들 수 없음")
+	var bag_size := player.equipment.bag.size()
+	error = kingdom.craft("greatsword", player.global_position, player.inventory, player.equipment)
+	_check(error == "" and player.equipment.item_in("weapon") == "greatsword" and not player.equipment.owns("rusty_sword")
+			and player.equipment.bag.size() == bag_size,
+		"들고 있던 낡은 검을 소모해 대검으로 강화 (손에 그대로) %s" % error)
 	_check(kingdom.demolish(cells[0]) != "" and kingdom.workbench_tier() == 1, "단계를 올린 제작대는 철거할 수 없음")
 
+	main.mouse_override = main.world.cell_center(cells[0])  # 핵도 가까우면 마우스를 올린 제작대가 열린다 (D-031)
 	var interact := InputEventAction.new()
 	interact.action = "interact"
 	interact.pressed = true
 	Input.parse_input_event(interact)
 	await _frames(2)
 	_check(main.hud.crafting_panel.visible, "E로 제작대 창이 열림")
+	main.mouse_override = Vector2.INF
+	var panel := main.hud.crafting_panel
+	var bag_before := player.equipment.bag.size()
+	panel.select_recipe("old_bow")
+	_check(player.equipment.bag.size() == bag_before and panel._item_icon.texture != null,
+		"제작 설계도 선택은 아이콘·상세만 표시하고 장비를 만들지 않음")
+	panel._craft.pressed.emit()
+	_check(player.equipment.bag.size() == bag_before + 1 and player.equipment.bag.back() == "old_bow",
+		"제작 버튼이 기존 명령 경로로 선택 장비 1개를 가방에 추가")
+	panel.show_tier(3)
+	_check(panel._empty.visible and panel._craft.disabled, "미발견 단계는 빈 목록 안내·제작 비활성")
+	panel.show_tier(-1)
+	panel.select_recipe("iron_helm")
+	_check(panel._selected != "iron_helm", "아직 공개되지 않은 설계도는 선택 불가")
+	kingdom.add_resources({"iron_ore": 8})
+	kingdom.discover({"iron_ore": 8})
+	panel._refresh()
+	panel.select_recipe("iron_helm")
+	_check(panel._craft.disabled and panel._status.text.contains("강화"), "재료가 있어도 제작대 단계가 낮으면 상세 확인만 가능")
+	panel.select_recipe("old_bow")
+	var wood_before := player.inventory.count("wood") + int(kingdom.stock.get("wood", 0))
+	player.inventory.take("wood", player.inventory.count("wood"))
+	kingdom.stock["wood"] = 0
+	await get_tree().create_timer(0.25).timeout
+	_check(panel._craft.disabled and panel._status.text == "재료 부족", "열린 제작 창에서 자원 감소를 자동 반영")
+	kingdom.add_resources({"wood": wood_before})
+	await get_tree().create_timer(0.25).timeout
+	_check(not panel._craft.disabled, "자원이 늘면 설계도 선택을 유지하며 제작 가능으로 복귀")
+	_check(panel._title.text.contains("1 / 3단계") and not "_upgrade" in panel, "제작 창은 현재 단계만 표시하고 강화 UI는 제거")
 	main.hud.crafting_panel.hide()
 
 	kingdom.buildings[cells[0]].take_damage(99999.0)
@@ -891,12 +1423,14 @@ func _check_progression(main: Main) -> void:
 	var world := main.world
 	player.global_position = player.spawn_point
 	await _frames(2)
-	progression.lose_unspent()
+	progression.lose_level_progress()
 
+	# 채집 경험치는 호스트가 20% 확률로 굴린다(확률은 logic_test). 여기서는 굴린 값이 그대로 들어오는지만 본다
 	var tree_cell := _find_tree(world)
-	Melee.swing(get_tree(), world.cell_center(tree_cell) - Vector2(40, 0), Vector2.RIGHT, {"damage": 999.0, "range": 52.0, "arc": 120.0})
-	await _frames(2)
-	_check(progression.xp > 0, "채집하면 경험치 (경험치 %d)" % progression.xp)
+	main.grant_harvest(WorldData.Obj.TREE, tree_cell, {"wood": 1}, 2)
+	_check(progression.xp == 2, "채집 경험치가 나오면 그만큼 받음 (경험치 %d)" % progression.xp)
+	main.grant_harvest(WorldData.Obj.TREE, tree_cell, {"wood": 1}, 0)
+	_check(progression.xp == 2, "채집 경험치가 안 나오면 재료만 받음")
 
 	var xp_before := progression.xp
 	var slime := Enemy.new().setup("slime", false)
@@ -949,10 +1483,13 @@ func _check_progression(main: Main) -> void:
 	main.hud.passive_panel.hide()
 
 	var vitality_rank := progression.rank("vitality")
-	progression.add_xp(7)
+	var level_before := progression.level
+	var points_before := progression.points
+	progression.add_xp(1)
 	await _kill_player(player)
-	_check(player.is_dead and progression.xp == 0 and progression.rank("vitality") == vitality_rank,
-		"죽으면 쓰지 않은 경험치는 사라지고 배운 패시브는 남음")
+	_check(player.is_dead and progression.xp == 0 and progression.rank("vitality") == vitality_rank
+			and progression.level == level_before and progression.points == points_before,
+		"죽으면 이번 레벨의 경험치만 사라지고 레벨·포인트·패시브는 남음")
 	_check(not player.weapon_visual.visible, "플레이어가 쓰러지면 무기와 손 그림도 함께 숨김")
 	await get_tree().create_timer(Balance.RESPAWN_TIME + 0.5).timeout
 	_check(player.weapon_visual.visible, "부활하면 장착 무기 그림도 다시 표시")
@@ -1160,18 +1697,23 @@ func _check_building_catalog(main: Main) -> void:
 	kingdom.add_resources({"wood": 500, "stone": 500, "copper": 100, "iron_ore": 100, "coal": 100, "hardwood": 100, "resin": 50,
 		"moss": 50, "ice_crystal": 20, "obsidian": 50, "fire_core": 20, "boss_essence": 5})
 	var bench := kingdom._find_type("workbench")
-	if bench != World.NO_CELL:
-		kingdom.buildings[bench].tier = 0
 	player.global_position = player.spawn_point
 	await _frames(2)
 	var near := _free_cell_near(main, world.cell_at(player.spawn_point), 2)
 	var error := kingdom.build(near, "iron_wall", player.global_position, null)
-	_check(error.contains("제작대") and not kingdom.buildings.has(near), "제작대 단계가 모자라면 철벽을 못 지음 (%s)" % error)
+	_check(error.contains("방어") and not kingdom.buildings.has(near), "방어 단계가 모자라면 철벽을 못 지음 (%s)" % error)
 	if bench == World.NO_CELL:
 		bench = _free_cell_near(main, world.cell_at(player.spawn_point), 3)
 		kingdom.build(bench, "workbench", player.global_position, null)
-	kingdom.buildings[bench].tier = RecipeDB.max_tier()
-	_check(kingdom.build(near, "iron_wall", player.global_position, null) == "", "제작대 단계가 오르면 철벽을 지을 수 있음")
+	_check(kingdom.workbench_tier() >= 0 and kingdom.build(near, "iron_wall", player.global_position, null) != "",
+		"제작대 단계는 건물을 열지 않음 (D-027)")
+	var upgraded := 0
+	for i in BuildingDB.max_defense_tier():
+		if kingdom.upgrade_defense(player.global_position, null) == "":
+			upgraded += 1
+	_check(upgraded == BuildingDB.max_defense_tier() and kingdom.upgrade_defense(player.global_position, null) != "",
+		"채집 재료로 방어 단계를 최고까지 올림 (%d단계)" % kingdom.defense_tier)
+	_check(kingdom.build(near, "iron_wall", player.global_position, null) == "", "방어 단계가 오르면 철벽을 지을 수 있음")
 	_check(kingdom.build(_free_cell_near(main, world.cell_at(player.spawn_point), 2), "workbench", player.global_position, null) != "",
 		"제작대는 왕국에 하나만")
 
@@ -1264,6 +1806,100 @@ func _free_cell_near(main: Main, start: Vector2i, ring: int) -> Vector2i:
 	return World.NO_CELL
 
 
+## 환경 설정(D-030): Esc 메뉴 → 설정, 볼륨·UI 크기·흔들림·피해 숫자가 바로 적용되고 기본값으로 돌아감
+func _check_settings(main: Main) -> void:
+	var settings := Session.settings
+	var hud := main.hud
+	var press_escape := func() -> void:
+		var escape := InputEventAction.new()
+		escape.action = "ui_cancel"
+		escape.pressed = true
+		Input.parse_input_event(escape)
+	main._close_overlays()
+	await _frames(1)
+	press_escape.call()
+	await _frames(2)
+	_check(hud.pause_menu.visible and not main.player.attack_enabled, "아무 창도 없을 때 Esc로 메뉴가 열리고 공격이 멈춤")
+	# 게임 종료는 한 번 누르면 확인만 묻는다 (두 번째는 실제로 꺼지므로 여기서 누르지 않는다)
+	hud.pause_menu.quit_button.pressed.emit()
+	_check(hud.pause_menu.visible and hud.pause_menu.quit_button.text == PauseMenu.QUIT_CONFIRM_TEXT, "게임 종료는 한 번 더 눌러야 꺼짐")
+	hud.pause_menu.open_settings()
+	await _frames(1)
+	var panel := hud.pause_menu.settings_panel
+	(panel._controls["music_volume"] as Range).value = 0.0
+	(panel._controls["ui_scale"] as Range).value = 1.2
+	(panel._controls["shake"] as Range).value = 0.0
+	(panel._controls["damage_numbers"] as CheckBox).button_pressed = false
+	await _frames(1)
+	var music_db := AudioServer.get_bus_volume_db(AudioServer.get_bus_index(GameSettings.MUSIC_BUS))
+	_check(panel.visible and music_db <= -79.0, "설정 창에서 음악 볼륨 0이면 음악 버스가 꺼짐 (%.0fdB)" % music_db)
+	_check(is_equal_approx(get_tree().root.content_scale_factor, 1.2) and main.player.camera.zoom.is_equal_approx(main._base_zoom / 1.2),
+		"UI 크기 120%: 화면 배율은 커지고 카메라 줌은 되돌려 월드 크기는 그대로")
+	main.player._shake = 0.0
+	main.player.add_shake(5.0)
+	var fx := get_tree().get_first_node_in_group("fx_layer")
+	var labels_before := fx.get_children().filter(func(node: Node) -> bool: return node is Label).size()
+	main.show_damage(main.player.global_position, 10.0, false)
+	var labels_after := fx.get_children().filter(func(node: Node) -> bool: return node is Label).size()
+	_check(main.player._shake == 0.0 and labels_after == labels_before, "흔들림 0·피해 숫자 끄기가 바로 적용됨")
+	press_escape.call()
+	await _frames(2)
+	_check(not panel.visible and hud.pause_menu.visible, "설정 창에서 Esc는 설정만 닫고 메뉴로 돌아감")
+	var saved := GameSettings.new()
+	saved.path = TEST_SETTINGS
+	saved.load_file()
+	_check(is_equal_approx(saved.get_value("ui_scale"), 1.2) and not saved.get_value("damage_numbers"), "설정 창을 닫으면 파일에 저장됨")
+	press_escape.call()
+	await _frames(2)
+	_check(not hud.pause_menu.visible, "메뉴에서 Esc를 다시 누르면 닫힘")
+	settings.reset()
+	await _frames(1)
+	_check(is_equal_approx(get_tree().root.content_scale_factor, 1.0) and main.player.shake_scale == 1.0, "기본값으로 되돌리면 원래 화면으로")
+
+
+## 무기별 타격감(D-029): 내가 맞힌 것만 흔들리고, 대검은 쌍검보다 세게 흔들리고 멀리 밀어낸다
+func _check_weapon_feel(main: Main) -> void:
+	var player := main.player
+	var missing := ItemDB.ITEMS.keys().filter(func(id: String) -> bool:
+		return ItemDB.ITEMS[id].has("weapon") and not WeaponArtDB.FEEL.has(WeaponArtDB.art(id).get("branch", "")))
+	_check(missing.is_empty(), "모든 무기 갈래에 타격감 값이 있음 %s" % [missing])
+	var previous := player.equipment.item_in("weapon")
+	var me := multiplayer.get_unique_id()
+	var hit_feel := func(weapon: String, source: int) -> float:
+		player.equipment.add_to_bag(weapon)
+		player.equipment.equip(weapon)
+		player._shake = 0.0
+		main._last_hit_feel = 0
+		main.show_damage(player.global_position + Vector2(40, 0), 10.0, false, source)
+		return player._shake
+	var tower: float = hit_feel.call("greatsword", Enemy.SOURCE_TOWER)
+	var heavy: float = hit_feel.call("greatsword", me)
+	await get_tree().create_timer(0.2, true, false, true).timeout  # 대검 멈칫이 끝나기를 기다린다
+	var light: float = hit_feel.call("twin_blades", me)
+	_check(tower == 0.0 and heavy > light and light > 0.0, "내가 맞힌 것만 흔들리고 대검이 쌍검보다 셈 (탑 %.1f, 대검 %.1f, 쌍검 %.1f)" % [tower, heavy, light])
+	await get_tree().create_timer(0.2, true, false, true).timeout
+	var pushed := func(weapon: String) -> float:
+		var dummy := Enemy.new().setup("brute", false)
+		dummy.position = player.global_position + Vector2(30, 0)
+		main.get_node("Enemies").add_child(dummy)
+		dummy.set_physics_process(false)
+		var stats: Dictionary = ItemDB.ITEMS[weapon]["weapon"].duplicate()
+		stats["damage"] = 0.0
+		stats["hits_world"] = false
+		Melee.swing(get_tree(), player.global_position, Vector2.RIGHT, stats)
+		var push := dummy._knockback.length()
+		dummy.queue_free()
+		return push
+	await _frames(1)
+	_check(pushed.call("greatsword") > pushed.call("twin_blades"), "대검은 쌍검보다 맞은 적을 멀리 밀어냄")
+	player.add_kick(WeaponArtDB.feel("longbow")["kick"])
+	_check(player._kick.dot(player.aim_direction) < 0.0, "장궁을 쏘면 화면이 조준 반대쪽으로 밀림 (반동)")
+	player._kick = Vector2.ZERO
+	player.equipment.add_to_bag(previous)
+	player.equipment.equip(previous)
+	await get_tree().create_timer(0.2, true, false, true).timeout
+
+
 ## 손맛·연출(D-023): 피해 숫자(강조), 폭발 흔들림, 보스 체력바·등장 배너, 해 질 녘 침공 예고
 func _check_feedback(main: Main) -> void:
 	var player := main.player
@@ -1288,6 +1924,8 @@ func _check_feedback(main: Main) -> void:
 	var slowed := Engine.time_scale
 	await get_tree().create_timer(Main.HITSTOP_EMPHASIS + 0.1, true, false, true).timeout
 	_check(slowed < 0.5 and is_equal_approx(Engine.time_scale, 1.0), "혼자 플레이에서 강조 공격은 잠깐 멈칫한 뒤 원래 속도로 (%.2f → %.2f)" % [slowed, Engine.time_scale])
+	await _check_weapon_feel(main)
+	await _check_settings(main)
 	player._shake = 0.0
 	Events.screen_shake_requested.emit(player.global_position + Vector2(40, 0), 7.0)
 	var near_shake := player._shake
@@ -1383,6 +2021,8 @@ func _check_bosses(main: Main) -> void:
 	await _frames(2)
 	_check(get_tree().paused and main.hud.game_over_panel.visible and main.hud.game_over_panel._title.text == "승리!",
 		"최종 보스를 쓰러뜨리면 승리 화면")
+	await get_tree().create_timer(SoundDB.BOSS_MUSIC_FADE_SECONDS + 0.1).timeout
+	_check(not main.boss_music._player.playing, "승리 화면 일시정지 뒤에도 보스 음악 페이드 종료")
 	main.hud.game_over_panel.hide()
 	get_tree().paused = false
 	for enemy in get_tree().get_nodes_in_group("enemies"):
@@ -1432,8 +2072,8 @@ func _check_title() -> void:
 		var button := node as Button
 		if button.is_visible_in_tree():
 			menu_buttons.append(button.text)
-	_check(menu_buttons == ["싱글플레이", "멀티플레이"] and not title._single_popup.visible and not title._multi_popup.visible,
-		"시작 화면에는 싱글플레이·멀티플레이 버튼만 보임 %s" % [menu_buttons])
+	_check(menu_buttons == ["싱글플레이", "멀티플레이", "설정"] and not title._single_popup.visible and not title._multi_popup.visible,
+		"시작 화면에는 싱글플레이·멀티플레이 버튼과 설정 버튼만 보임 %s" % [menu_buttons])
 	_check(title.find_children("*", "TextureRect", true, false).any(func(node: Node) -> bool: return (node as TextureRect).texture == title.LOGO),
 		"시작 화면에 로고가 보임")
 	title._open(title._single_popup)
@@ -1468,14 +2108,14 @@ func _check_passive_graphics() -> void:
 		_check(PassiveArtDB.LAYOUT.has(id) and not regions.has(region) and not icons.get_region(Rect2i(region)).is_invisible(), "패시브 고유 아이콘·방사형 배치 %s" % id)
 		regions.append(region)
 	panel._tree.buttons["fortify"].pressed.emit()
-	_check(panel._selected_id == "fortify" and panel._learn_button.disabled and progression.ranks.is_empty(), "잠긴 노드 선택은 상세만 열고 경험치를 쓰지 않음")
+	_check(panel._selected_id == "fortify" and panel._learn_button.disabled and progression.ranks.is_empty(), "잠긴 노드 선택은 상세만 열고 포인트를 쓰지 않음")
 	panel._tree.buttons["sword_mastery"].pressed.emit()
-	_check(panel._learn_button.disabled and panel._tree.buttons["sword_mastery"].state == PassiveNode.State.LOCKED, "경험치 부족은 배울 수 없는 상태로 표시")
+	_check(panel._learn_button.disabled and panel._tree.buttons["sword_mastery"].state == PassiveNode.State.LOCKED, "포인트 부족은 배울 수 없는 상태로 표시")
 	progression.add_xp(200)
-	var before := progression.xp
+	var before := progression.points
 	var cost := progression.next_cost("sword_mastery")
 	panel._learn_button.pressed.emit()
-	_check(progression.rank("sword_mastery") == 1 and progression.xp == before - cost and panel._tree.buttons["sword_sweep"].state == PassiveNode.State.AVAILABLE and panel._tree.buttons["sword_mastery"].learn_pulse > 0.0, "배우기 버튼은 학습 명령을 호출하고 다음 노드를 열음")
+	_check(progression.rank("sword_mastery") == 1 and progression.points == before - cost and panel._tree.buttons["sword_sweep"].state == PassiveNode.State.AVAILABLE and panel._tree.buttons["sword_mastery"].learn_pulse > 0.0, "배우기 버튼은 학습 명령을 호출하고 다음 노드를 열음")
 	while progression.rank("sword_mastery") < PassiveDB.max_rank("sword_mastery"):
 		panel._learn_button.pressed.emit()
 	_check(panel._learn_button.disabled and panel._tree.buttons["sword_mastery"].state == PassiveNode.State.COMPLETE, "최고 단계 노드는 완료 표시하고 추가 학습을 막음")
@@ -1498,3 +2138,83 @@ func _check_meeting(main: Main) -> void:
 func _frames(count: int) -> void:
 	for i in count:
 		await get_tree().process_frame
+
+
+func _check_map_bag_art(main: Main) -> void:
+	var map_view := main.hud._minimap
+	var bounds := map_view._map_rect()
+	_check(map_view.mini and bounds.size.x == bounds.size.y and bounds.position.x > 0.0 and bounds.end.y < map_view.size.y,
+		"미니맵은 프레임 안의 정사각형 영역에 지도를 그려 지도 좌표 비율 유지")
+	_check(main.hud._bag_gauge.get_global_rect().end.x < map_view.get_global_rect().position.x,
+		"가방 적재량은 미니맵 왼쪽에 겹치지 않게 배치")
+	var bag := Inventory.new()
+	var gauge := Hud.BagGauge.new()
+	gauge.setup(bag)
+	main.hud.add_child(gauge)
+	_check(gauge.used == 0 and gauge.ratio == 0.0, "빈 재료 가방은 0칸·0% 표시")
+	bag.add({"wood": 1, "stone": 1})
+	gauge._refresh()
+	_check(gauge.used == 2 and is_equal_approx(gauge.ratio, 2.0 / bag.capacity()), "적재율은 재료 개수가 아니라 실제 사용 칸 기준")
+	bag.add({"wood": Balance.STACK_SIZE * bag.capacity()})
+	gauge._refresh()
+	_check(gauge.used == gauge.capacity and gauge.ratio == 1.0 and gauge.tooltip_text.contains("0칸 남음"), "가득 찬 가방은 용량·잔여 칸을 정확하게 표시")
+	bag.clear()
+	bag.bonus_slots = 4
+	gauge._refresh()
+	_check(gauge.capacity == Balance.INVENTORY_SLOTS + 4 and gauge.used == 0, "입고·사망으로 비운 재료와 큰 가방의 추가 용량을 즉시 반영")
+	gauge.queue_free()
+	var drawer_was_open := main.hud._resource_toggle.button_pressed
+	main.hud._bag_gauge.activated.emit()
+	_check(main.hud._resource_drawer.visible != drawer_was_open, "가방을 누르면 기존 가방·창고 재료 목록 열림")
+	main.hud._resource_toggle.button_pressed = drawer_was_open
+	await _frames(1)
+
+
+func _check_cursor_lifecycle() -> void:
+	var window := get_window()
+	var mouse_connections := window.mouse_entered.get_connections().size()
+	var focus_connections := window.focus_entered.get_connections().size()
+	var owner := Node.new()
+	add_child(owner)
+	CursorArt.attach(owner, true)
+	_check(window.mouse_entered.get_connections().size() == mouse_connections + 1
+		and window.focus_entered.get_connections().size() == focus_connections + 1, "커서 소유 씬이 창 진입·포커스 복귀 갱신을 등록")
+	window.mouse_entered.emit()
+	window.focus_entered.emit()
+	owner.queue_free()
+	await _frames(2)
+	_check(window.mouse_entered.get_connections().size() == mouse_connections
+		and window.focus_entered.get_connections().size() == focus_connections, "씬 종료 시 커서 갱신 연결도 해제돼 다음 화면을 덮어쓰지 않음")
+	window.mouse_entered.emit()
+	CursorArt.clear()
+
+
+func _check_building_lighting(main: Main) -> void:
+	var tower := Building.new().setup("arrow_tower", Vector2i.ZERO)
+	tower.position = main.player.position + Vector2(2000, 0)
+	main.add_child(tower)
+	tower.set_physics_process(false)
+	var tower_light := tower.get_children().filter(func(node: Node) -> bool: return node is PointLight2D)[0] as PointLight2D
+	var core_light := main.kingdom.core.get_children().filter(func(node: Node) -> bool: return node is PointLight2D)[0] as PointLight2D
+	var player_light := main.player.get_children().filter(func(node: Node) -> bool: return node is PointLight2D)[0] as PointLight2D
+	var clock := main.day_night
+	var phase := clock.phase
+	var time := clock.time
+	clock.phase = DayNight.Phase.NIGHT
+	clock.time = 0.0
+	clock._process(0.0)
+	_check(tower_light.energy < player_light.energy and core_light.energy < player_light.energy
+		and is_equal_approx(player_light.energy, DayNight.LIGHT_ENERGY), "밤에는 건물·성 조명만 약하게 하고 플레이어 조명 유지")
+	var night_energy := tower_light.energy
+	clock.phase = DayNight.Phase.DAY
+	clock.time = Balance.DAY_LENGTH - Balance.DUSK_LENGTH * 0.5
+	clock._process(0.0)
+	_check(is_equal_approx(tower_light.energy, night_energy * 0.5), "광원별 밝기 배율은 황혼 보간 중에도 유지")
+	clock.time = Balance.DAY_LENGTH * 0.5
+	clock._process(0.0)
+	_check(tower_light.energy == 0.0 and core_light.energy == 0.0, "낮에는 건물·성 조명이 모두 꺼짐")
+	clock.phase = phase
+	clock.time = time
+	clock._process(0.0)
+	tower.queue_free()
+	await _frames(1)

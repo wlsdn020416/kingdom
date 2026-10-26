@@ -40,6 +40,9 @@ class Runner extends Node:
 
 	func _ready() -> void:
 		process_mode = Node.PROCESS_MODE_ALWAYS
+		# 이 기기의 실제 환경 설정과 상관없이 기본값으로 검사한다 (D-030)
+		Session.settings.path = "user://settings_net_test_%s.cfg" % role
+		Session.settings.reset()
 		var deadline := Time.get_ticks_msec() + TIMEOUT_MS
 		var net: NetSession = Session.net
 		if role == "host":
@@ -72,6 +75,7 @@ class Runner extends Node:
 			"상대 위치가 전달됨 (%s, 기대 %s)" % [remote.position if remote != null else "없음", expected])
 		await _check_network_audio(main, deadline)
 		await _check_weapon_visuals(main, remote, deadline)
+		await _check_boss_music(main, remote, deadline)
 		if role == "host":
 			await _host_combat(main, remote, deadline)
 		else:
@@ -98,6 +102,7 @@ class Runner extends Node:
 			_check(_heard.count("shield") == 1, "참가자: 내 행동음은 즉시 한 번 들리고 호스트가 되돌려 보내지 않음")
 
 	func _check_weapon_visuals(main: Main, remote: RemotePlayer, deadline: int) -> void:
+		_check(remote.weapon_visual.get_index() > remote._sprite.get_index() and remote.weapon_visual.z_index == remote._sprite.z_index, "상대 무기도 몸·장비 앞에 그리며 같은 Y 정렬 유지")
 		var worn := "iron_helm" if role == "host" else "cloth_shoes"
 		main.player.equipment.add_to_bag(worn)
 		main.player.equipment.equip(worn)
@@ -109,15 +114,18 @@ class Runner extends Node:
 			main.player._show_attack("obsidian_blade")
 			main.player.fire({"direction": Vector2.UP, "damage": 0.0, "lifetime": 2.0, "art": "ember"})
 		else:
+			# 화염탄은 2초 뒤 사라진다. 흑요석 검 모습을 기다리는 동안 이미 왔다 갈 수 있어서, 들어오는 순간을 미리 기록한다
+			var ember_seen := [false]
+			main.get_node("Projectiles").child_entered_tree.connect(func(node: Node) -> void:
+				if node is Projectile and node.visual_only and node.art_id == "ember":
+					ember_seen[0] = true)
 			main.player.equipment.add_to_bag("old_bow")
 			main.player.equipment.equip("old_bow")
 			main.player._show_attack("old_bow")
 			await _until(func() -> bool: return remote.weapon_visual.weapon_id == "obsidian_blade" and remote.weapon_visual.attack_item == "obsidian_blade", deadline)
 			_check(remote.weapon_visual.weapon_id == "obsidian_blade" and remote.weapon_visual.attack_item == "obsidian_blade", "참가자: 호스트의 흑요석 검과 휘두르기 모션이 전달됨")
-			var seen := func() -> bool:
-				return main.get_node("Projectiles").get_children().any(func(node: Node) -> bool: return node is Projectile and node.visual_only and node.art_id == "ember")
-			await _until(seen, deadline)
-			_check(seen.call(), "참가자: 호스트가 쏜 화염탄은 피해 없는 표시 복제본으로 보임")
+			await _until(func() -> bool: return ember_seen[0], deadline)
+			_check(ember_seen[0], "참가자: 호스트가 쏜 화염탄은 피해 없는 표시 복제본으로 보임")
 		var expected_slot := "boots" if role == "host" else "head"
 		var expected_item := "cloth_shoes" if role == "host" else "iron_helm"
 		await _until(func() -> bool: return remote.equipment_visual._items.get(expected_slot) == expected_item, deadline)
@@ -135,10 +143,61 @@ class Runner extends Node:
 				break
 			await get_tree().create_timer(0.45).timeout
 		_check(seen_passive.call(), "상대의 K 패시브 연출이 판정 없이 표시됨")
+		var seen_weapon := func() -> bool:
+			return get_tree().get_first_node_in_group("fx_layer").get_children().any(func(node: Node) -> bool: return node is CombatEffect and node.effect_id == "frost_ring" and node.global_position.distance_to(remote.global_position) < Balance.TILE)
+		for i in 5:
+			main.player.show_weapon_effect("frost_ring", main.player.global_position, 1.2)
+			await get_tree().create_timer(0.25).timeout
+			if seen_weapon.call():
+				break
+		_check(seen_weapon.call(), "무기 트리 스킬 그림을 상대 화면에 피해 없이 공유")
+
+	func _check_boss_music(main: Main, remote: RemotePlayer, deadline: int) -> void:
+		if role == "host":
+			var boss := Enemy.new().setup("venom_tyrant", true)
+			boss.position = main.player.global_position + Vector2(2000, 0)
+			main.get_node("Enemies").add_child(boss)
+			boss.set_physics_process(false)
+			boss._animation_frame = 7
+			boss._facing_left = true
+			boss._flash = 1.0
+			await _until(func() -> bool: return main.boss_music._active and remote.weapon_visual.weapon_id == "rusty_sword", deadline)
+			_check(main.boss_music._player.playing, "호스트: 실제 보스 등장으로 전투 음악 재생")
+			boss.queue_free()
+			await _until(func() -> bool: return not main.boss_music._player.playing and remote.weapon_visual.weapon_id == "old_bow", deadline)
+			_check(not main.boss_music._player.playing, "호스트: 보스 제거 후 전투 음악 페이드 종료")
+		else:
+			await _until(func() -> bool: return main.boss_music._active, deadline)
+			_check(main.boss_music._player.playing and not main.boss_status().is_empty(), "참가자: 동기화된 보스 표시로 같은 전투 음악 재생")
+			var shown := false
+			for node in main.get_node("Enemies").get_children():
+				if node is EnemyPuppet and node.type_id == "venom_tyrant":
+					shown = node._frame == 7 and node._facing_left and node._flashing and Enemy.sprite_texture(node.type_id) == Enemy.BOSS_TEXTURE
+			_check(shown, "참가자: 보스 고유 시트의 8번째 프레임·반전·피격을 호스트에게서 받음")
+			main.player.equipment.equip("rusty_sword")
+			await _until(func() -> bool: return not main.boss_music._player.playing, deadline)
+			_check(main.boss_status().is_empty() and not main.boss_music._player.playing, "참가자: 호스트 보스 제거가 전달되면 음악도 페이드 종료")
+			main.player.equipment.equip("old_bow")
+
 
 	## 참가자 옆에 늑대를 만들고 참가자의 공격으로 죽는지 본다. 그다음 적 생성을 끄고, 핵에 피해를 주고, 밤으로 넘긴다.
 	## 끝나면 참가자가 나갈 때까지 기다린다 (참가자의 검사에 호스트 상태가 필요하다)
 	func _host_combat(main: Main, remote: RemotePlayer, deadline: int) -> void:
+		# 낮에 왕국 안에 있는 참가자(RemotePlayer)는 배회 적이 노리지 않고, 적도 영토에 들어오지 않는다 (D-026)
+		# 참가자가 나중에 핵 창에서 영토 확장을 요청한다 (D-027). 비용은 창고에서 낸다
+		main.kingdom.add_resources(Balance.TERRITORY_UPGRADES[0])
+		var core := main.kingdom.core.global_position
+		var guard := Enemy.new().setup("scorpion", false)
+		guard.avoids_kingdom = true
+		guard.position = core + (remote.global_position - core).normalized() * (main.kingdom.territory_radius() + 2.0) * Balance.TILE
+		main.get_node("Enemies").add_child(guard)
+		var entered := false
+		for i in 60:
+			await get_tree().physics_frame
+			entered = entered or guard.in_kingdom(guard.global_position)
+		_check(guard.in_kingdom(remote.global_position) and not entered and guard._target == null,
+			"호스트: 낮에 왕국 안의 참가자는 배회 적이 노리지 않고 적도 영토에 들어오지 않음 (D-026)")
+		guard.queue_free()
 		var killer := [0]
 		Events.enemy_killed.connect(func(enemy: Node) -> void: killer[0] = (enemy as Enemy).killed_by)
 		var wolf := Enemy.new().setup("wolf", false)
@@ -158,11 +217,15 @@ class Runner extends Node:
 			return main.world.data.get_object(targets["tree"]) == WorldData.Obj.NONE and main.world.data.get_object(targets["chest"]) == WorldData.Obj.NONE
 		await _until(gone, deadline)
 		_check(gone.call(), "호스트: 참가자가 부순 나무와 연 상자가 내 월드에서도 사라짐")
+		# 아침 재생(D-035)을 호스트가 굴려 참가자에게 보낸다. 참가자는 자기 월드의 자원 수가 목표로 돌아오는지 본다
+		main.regrow_resources()
 		await _until(func() -> bool: return kingdom.stock.get("wood", 0) > wood_before, deadline)
 		_check(kingdom.stock.get("wood", 0) > wood_before, "호스트: 참가자가 입고한 나무가 내 창고로 (%d → %d)" % [wood_before, kingdom.stock.get("wood", 0)])
 		var wall := _wall_cell(main)
 		await _until(func() -> bool: return kingdom.buildings.has(wall), deadline)
 		_check(kingdom.buildings.has(wall) and kingdom.buildings[wall].type_id == "wood_wall", "호스트: 참가자의 건설 요청으로 내 왕국에 벽이 생김")
+		await _until(func() -> bool: return kingdom.territory_level == 1, deadline)
+		_check(kingdom.territory_level == 1, "호스트: 참가자의 영토 확장 요청으로 내 왕국 영토가 넓어짐 (D-027)")
 		var data := main.world.data
 		_check(data.is_explored(targets["tree"]) and data.is_explored(targets["chest"]),
 			"호스트: 참가자가 다녀온 나무·상자 근처가 내 지도에도 탐험됨")
@@ -183,10 +246,11 @@ class Runner extends Node:
 
 	func _client_combat(main: Main, deadline: int) -> void:
 		var enemies := main.get_node("Enemies")
-		# 호스트가 낮에 만드는 배회 적(슬라임)도 보일 수 있어서 늑대를 골라 지켜본다
+		# 바이옴 서식 몬스터(D-035)에도 늑대가 있으므로, 호스트가 내 옆(40px)에 만든 늑대만 지켜본다
 		var wolf_puppet := func() -> EnemyPuppet:
 			for child in enemies.get_children():
-				if child is EnemyPuppet and child.type_id == "wolf" and not child.is_queued_for_deletion():
+				if child is EnemyPuppet and child.type_id == "wolf" and not child.is_queued_for_deletion() \
+						and child.global_position.distance_to(main.player.global_position) < 4.0 * Balance.TILE:
 					return child
 			return null
 		await _until(func() -> bool: return wolf_puppet.call() != null, deadline)
@@ -239,6 +303,10 @@ class Runner extends Node:
 
 	## 핵 근처로 와서 가방을 입고하고, 벽을 짓는다. 창고·건물은 호스트가 정한 상태를 받는다
 	func _client_kingdom(main: Main, deadline: int) -> void:
+		var data := main.world.data
+		var regrown := func() -> bool: return WorldGenerator.count_resources(data) == data.resource_targets
+		await _until(regrown, deadline)
+		_check(regrown.call(), "참가자: 호스트의 아침 재생으로 자란 나무·광맥이 내 월드에도 생김 (D-035)")
 		var kingdom := main.kingdom
 		main.player.global_position = main.player.spawn_point + Vector2(0, -Balance.TILE)
 		await _until(func() -> bool: return main.player.inventory.is_empty(), deadline)
@@ -254,6 +322,10 @@ class Runner extends Node:
 		await _until(func() -> bool: return kingdom.stock.get("wood", 0) == stock_before - cost, deadline)
 		_check(kingdom.stock.get("wood", 0) == stock_before - cost,
 			"참가자: 건설 비용이 빠진 호스트 창고를 받음 (나무 %d → %d)" % [stock_before, kingdom.stock.get("wood", 0)])
+		main.kingdom_sync.expand_territory()
+		await _until(func() -> bool: return kingdom.territory_level == 1, deadline)
+		_check(kingdom.territory_level == 1 and kingdom.territory_radius() == Balance.TERRITORY_RADIUS + Balance.TERRITORY_STEP,
+			"참가자: 핵 창의 영토 확장 요청이 호스트에서 처리되어 내 영토도 넓어짐 (D-027)")
 		await _client_map(main, deadline)
 
 	## 핑을 찍고, 호스트가 걸어가 밝힌 곳이 내 지도에 탐험되는지 본다
