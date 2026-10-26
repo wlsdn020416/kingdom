@@ -56,11 +56,12 @@ const RESPAWN_INVULN := 2.0
 
 # 적
 # 바이옴 서식 몬스터 (D-035, 사용자 결정): 바이옴 넓이에 비례한 수가 월드에 늘 살고 매일 아침 모자란 만큼 채워진다. 수치 임시
-const RESIDENT_CELLS_PER_MONSTER := 550  # 바이옴 땅 이 칸 수마다 1마리
-const RESIDENT_MAX_PER_BIOME := 20
+const RESIDENT_CELLS_PER_MONSTER := 183  # 바이옴 땅 이 칸 수마다 1마리 (사용자 요청으로 550에서 3배)
+const RESIDENT_MAX_PER_BIOME := 60
 const RESIDENT_PLAYER_GAP := 14.0 * TILE  # 플레이어 눈앞에서 갑자기 생기지 않게 이 거리 밖에만 채운다
 const RESIDENT_LEASH := 12.0 * TILE  # 서식지에서 이만큼 벗어나면 돌아간다
 const RESIDENT_CHASE_LIMIT := 24.0 * TILE  # 서식지에서 이보다 멀리는 쫓아가지 않는다
+const RESIDENT_WAKE_RANGE := 40.0 * TILE  # 플레이어가 이 거리 밖이면 서식 몬스터는 잠들어 움직이지 않는다 (성능)
 const WANDERER_DESPAWN_DISTANCE := 40.0 * TILE  # 서식지가 없는 배회 적(테스트 등에서 직접 만든 적)만 이 거리에서 사라진다
 const INVADER_AGGRO := 6.0 * TILE
 const WANDERER_AGGRO := 10.0 * TILE

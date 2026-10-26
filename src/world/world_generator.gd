@@ -19,7 +19,7 @@ const COAST_DROP := 3.0  # 해안을 늦게 시작하는 대신 가파르게 떨
 const KINGDOM_FLOOR_RADIUS := 3
 const CHEST_COUNT := 90  # 월드 넓이에 비례 (192칸일 때 40개)
 ## 나무·바위·광석을 _object_for 밀도의 이 비율만큼만 만든다. 매일 아침 이 총량까지 다시 자란다 (D-035, 사용자 결정)
-const RESOURCE_DENSITY := 0.25
+const RESOURCE_DENSITY := 0.5  # 사용자 요청으로 0.25에서 2배
 const CHEST_MIN_DISTANCE := 20.0
 
 

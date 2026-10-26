@@ -19,6 +19,7 @@ const ANIMATION_FRAMES := 4
 const ANIMATION_FPS := 8.0
 const IDLE_ANIMATED := ["slime", "bog_slime", "fire_imp"]  # 보스는 모두 호흡한다
 const SPIRAL_LIFETIME := 2.4
+const SLEEP_CHECK_INTERVAL := 0.5  # 서식 몬스터가 깰지 확인하는 간격(초). 잠든 동안은 이것만 센다
 const BULLET_COLOR := Color("d070ff")
 ## take_damage의 source: 플레이어는 멀티플레이 peer id(혼자·호스트 = 1), 화살탑은 이 값
 const SOURCE_TOWER := -1
@@ -44,6 +45,8 @@ var avoids_kingdom := false
 ## 바이옴 서식 몬스터(D-035)의 집과 바이옴. 집이 있으면 사라지지 않고 집 근처를 돌아다닌다. INF·-1이면 서식지 없음
 var home := Vector2.INF
 var home_terrain := -1
+var _asleep := false
+var _sleep_check := 0.0
 
 var _target: Node2D  # 이번 프레임에 노리는 플레이어 (Player 또는 RemotePlayer)
 var _core: Core
@@ -115,6 +118,15 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	# 먼 서식 몬스터는 잠들어 아무것도 하지 않는다. 수백 마리를 매 프레임 움직이면 호스트가 느려진다 (D-035)
+	if home.is_finite():
+		_sleep_check -= delta
+		if _sleep_check <= 0.0:
+			_sleep_check = SLEEP_CHECK_INTERVAL
+			var near := _nearest_player(false)
+			_asleep = near == null or global_position.distance_to(near.global_position) > Balance.RESIDENT_WAKE_RANGE
+		if _asleep:
+			return
 	_attack_cooldown -= delta
 	_flash -= delta
 	var nearest := _nearest_player(false)

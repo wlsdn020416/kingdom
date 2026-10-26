@@ -6,6 +6,8 @@ extends Node
 ## RPC 경로가 모두에게 같아야 해서 Main이 이름 "CombatSync"로 붙인다. 혼자 플레이면 아무것도 하지 않는다.
 
 const SNAPSHOT_INTERVAL := 0.1  # 초당 10번
+## 참가자마다 이 거리 안의 적만 보낸다. 바이옴 서식 몬스터(D-035)가 월드에 수백 마리 있어 전부 보내면 너무 크다. 보스는 항상 보낸다
+const SNAPSHOT_RANGE := 40.0 * Balance.TILE
 const MAX_HITS_PER_SNAPSHOT := 48  # 피해 숫자는 적 모습과 함께 모아 보낸다. 넘치면 버린다 (연출일 뿐)
 ## 참가자가 보낸 공격 위치가 호스트가 아는 그 사람 위치에서 이보다 멀면 무시한다 (요청을 믿지 않는다, AGENTS 5절)
 const MAX_ATTACK_OFFSET := 4.0 * Balance.TILE
@@ -130,11 +132,15 @@ func _physics_process(delta: float) -> void:
 	if _timer > 0.0:
 		return
 	_timer = SNAPSHOT_INTERVAL
-	var enemies := []
-	for enemy: Enemy in get_tree().get_nodes_in_group("enemies"):
-		enemies.append(enemy.appearance())
 	var clock := _main.day_night
-	_snapshot.rpc(enemies, clock.phase, clock.day, clock.time, _main.kingdom.core.hp)
+	var all: Array = get_tree().get_nodes_in_group("enemies")
+	for peer_id: int in _main.player_sync.remote_ids():
+		var viewer := _main.player_sync.remote(peer_id)
+		var enemies := []
+		for enemy: Enemy in all:
+			if enemy.is_boss() or enemy.global_position.distance_to(viewer.global_position) <= SNAPSHOT_RANGE:
+				enemies.append(enemy.appearance())
+		_snapshot.rpc_id(peer_id, enemies, clock.phase, clock.day, clock.time, _main.kingdom.core.hp)
 	if not _pending_hits.is_empty():
 		_hits.rpc(_pending_hits)
 		_pending_hits = []
@@ -173,7 +179,7 @@ func _snapshot(enemies: Array, phase: int, day: int, time: float, core_hp: float
 			_main.get_node("Enemies").add_child(puppet)
 			_puppets[id] = puppet
 		puppet.apply(look[2], look[3], look[4], look[5], look[6])
-	# 목록에서 빠진 적은 사라진 것 (멀어져서 없어짐, 아침에 타 버림)
+	# 목록에서 빠진 적은 사라진 것 (아침에 타 버림) 또는 내게서 멀어진 것(SNAPSHOT_RANGE 밖). 다시 가까워지면 새로 만든다
 	for id: int in _puppets.keys():
 		if not seen.has(id):
 			_puppets[id].queue_free()
