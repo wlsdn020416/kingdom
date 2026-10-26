@@ -19,20 +19,23 @@ project.godot ─ 오토로드 Events(신호), Session(시드·씬 전환·입�
 
 `godot --path . -- --seed=abc`로 실행하면 시작 화면을 건너뛴다.
 
+`CursorArt`(src/core)는 씬 진입 시 커서 이미지·클릭 기준점을 적용하는 정적 모음이다. Title._ready의 CursorArt.attach는 황동/강철 화살표(32×32, 핫스팟 3,2), Main._ready의 attach는 중앙 조준점(32×32, 핫스팟 16,16)을 기본 화살표 형태에 매핑한다. 따라서 시작 화면 복귀·즉시 시드 시작도 현재 화면의 커서로 바뀐다. UiKit.button은 POINTING_HAND를 써 왕실 장갑 포인터(핫스팟 10,5)를 표시한다. attach는 해당 창의 mouse_entered/focus_entered에서 이미지를 재적용하고 모양을 한 번 왕복해 네이티브 커서를 갱신한다. macOS에서는 같은 모양·이미지 캐시가 갱신을 생략해 기본 화살표가 남을 수 있기 때문이다(Godot #121474). owner.tree_exiting에서 두 연결과 네이티브 텍스처 참조를 해제해 다음 씬의 커서를 덮어쓰거나 렌더러 종료 시 GPU 자원이 남지 않게 한다. 텍스트 입력용 IBEAM은 엔진 기본을 유지한다. 커서 그림은 assets/ui/cursor_menu·cursor_hand·cursor_aim의 PNG/Aseprite이며 tools/build_cursor_art.lua로 재현한다. 오토로드·추가 노드·조준/입력 좌표 변경은 없다.
+
 ## 2. 한 판의 씬 구성 (`scenes/main.tscn`)
 
 ```
-Main (Node2D, scenes/main.gd)          조립 지점: 모든 시스템의 setup() 호출, 전역 단축키
+Main (Node2D, Y 정렬, scenes/main.gd)   조립 지점: 모든 시스템의 setup() 호출, 전역 단축키
 ├─ Darkness (CanvasModulate)           DayNight가 색을 바꿈
-├─ World [world]                       src/world/world.gd — Terrain/Objects TileMapLayer
-├─ Kingdom                             src/kingdom/kingdom.gd — 자원, 건물
+├─ World [world] (Y 정렬)              src/world/world.gd — Terrain/Objects TileMapLayer
+├─ Kingdom (Y 정렬)                   src/kingdom/kingdom.gd — 자원, 건물
 │  └─ Core [core] (StaticBody2D)       src/kingdom/core.gd — 왕국 핵 체력
-├─ Enemies (Node2D)                    WaveSpawner가 Enemy를 여기에 추가
+├─ Enemies (Node2D, Y 정렬)           WaveSpawner가 Enemy를 여기에 추가
 ├─ Player [player] (CharacterBody2D)   src/characters/player.gd
 │  └─ Camera
 ├─ Projectiles [projectiles]           Projectile.spawn()이 여기에 추가
 ├─ Effects [fx_layer]                  Fx가 파티클·글자를 여기에 추가
 ├─ PingMarkers                         전략회의 핑 표시
+├─ BossMusic (코드로 추가)               MusicPlayer: 보스전 반복 음악·페이드·회의 일시정지
 ├─ SoundEffects (코드로 추가)            효과음 재생·거리 감쇠·동시 재생 제한
 ├─ BuildMode                           건설 모드 입력·미리보기
 ├─ DayNight (Node)                     낮/밤 시간
@@ -42,22 +45,22 @@ Main (Node2D, scenes/main.gd)          조립 지점: 모든 시스템의 setup(
 
 `Main._ready()`가 코드로 붙이는 동기화 노드(이름이 모두에게 같아야 RPC가 닿는다, D-017): `PlayerSync`(플레이어), `CombatSync`(적·시간·핵·효과음), `WorldSync`(나무·바위·상자), `KingdomSync`(창고·건물·장비 상자·제작대·수리·입고. 입력·UI는 Kingdom 명령 메서드 대신 이 노드의 같은 이름 메서드를 부른다), `MapSync`(탐험 칸·핑, D-018. 전략회의 창은 이 노드의 `add_ping`·`clear_pings`를 부른다), `MeetingSync`(전략회의 열기·준비·전원 재개, D-019. T 키와 회의 창의 준비 완료가 이걸 거친다). 혼자 플레이에서는 아무것도 보내지 않고 Kingdom을 바로 부른다.
 
-`[이름]`은 노드 그룹. 코드에서 추가되는 그룹: `enemies`(Enemy, 호스트에만), `lights`(Fx.add_light), `player`(RemotePlayer도 들어간다. 그래서 `player` 그룹을 `Player` 타입으로 가정하면 안 된다, D-017).
+`[이름]`은 노드 그룹. 코드에서 추가되는 그룹: `kingdom`(Kingdom, 적이 영토 크기를 읽는다, D-026·D-027), `enemies`(Enemy, 호스트에만), `lights`(Fx.add_light), `player`(RemotePlayer도 들어간다. 그래서 `player` 그룹을 `Player` 타입으로 가정하면 안 된다, D-017).
 `Enemy`, `Building`, `Projectile`, UI 패널은 `.tscn` 없이 코드로 생성한다. 플레이어 몸은 `Player`가 코드로 붙이는 `Sprite2D`(`assets/characters/player.png`, D-012)가, 무기·공격 궤적은 그 뒤에 붙인 `WeaponVisual`이 그린다. Player의 `_draw()`는 보호막 표시만 맡는다. 투사체도 픽셀 시트를 사용하며 나머지 UI는 기존 코드로 그린다.
 
-건설물은 `assets/kingdom/buildings_expanded.aseprite`·PNG(1408×384)를 쓴다. 한 칸 64×96, 가로 22개 외형(19종 + 제작대 추가 3단계), 세로 4프레임·0.16초다. `BuildingDB.sprite_column`·`sprite_top`과 제작대 `sprite_tops`가 메뉴 크롭·단계별 체력바를 정한다. `Building.draw_art()`를 월드·설치 미리보기·도감이 공유한다. 위치 (-32,-80)로 접지하며 실제 충돌은 기존 32×32 한 칸이다. 목재·금속·흑요석·정수 벽, 각 공성 장치, 생활 설비가 고유 실루엣을 쓴다. 색만 입힌 확장 건물 임시 그림은 대체됐고 기존 8칸 원본은 최초 시안으로 보존한다. 불·서리·번개·마법 고리 등은 연출만 반복하며 전투 판정·난수는 소비하지 않는다.
+건설물은 `assets/kingdom/buildings_expanded.aseprite`·PNG(1472×384)를 쓴다. 한 칸 64×96, 가로 23개 외형(20종 + 제작대 추가 3단계), 세로 4프레임·0.16초다. `BuildingDB.sprite_column`·`sprite_top`과 제작대 `sprite_tops`가 메뉴 크롭·단계별 체력바를 정한다. `Building.draw_art()`를 월드·설치 미리보기·도감이 공유한다. 원본 위치 (-32,-80)에 Building.art_scale을 함께 적용해 공성탑(siege)은 70%, 생활 건물(utility)은 55%로 접지 기준점을 유지하며 그린다. 벽·문은 100%다. 설치 미리보기와 도감 상세도 같은 draw_art를 사용하고 체력바는 축소 후 최상단을 따른다. 아이콘은 원본 크롭, 실제 충돌은 기존 32×32 한 칸이다. 목재·금속·흑요석·정수 벽, 각 공성 장치, 생활 설비가 고유 실루엣을 쓴다. 색만 입힌 확장 건물 임시 그림은 대체됐고 기존 8칸 원본은 최초 시안으로 보존한다. 불·서리·번개·마법 고리 등은 연출만 반복하며 전투 판정·난수는 소비하지 않는다.
 
 적은 `assets/enemies/enemies.aseprite`(64×64, 32프레임, 종류별 태그·레이어)에서 내보낸 `enemies.png`(256×512)를 쓴다. 4열은 움직임 프레임, 8행은 슬라임·고블린·거인·늑대·전갈·늪 슬라임·화염 정령·보스다. `EnemyDB`의 `sprite_row`가 행, `sprite_top`이 전체 프레임의 최상단 y좌표다. `Enemy._draw()`는 원래 크기로 `(-32, -40)`에 그리고 x 이동 방향으로 좌우 반전한다. 8fps로 걷고 정지 시 0번 칸으로 돌아간다(슬라임·늪 슬라임·불꽃·보스는 정지 중에도 움직임 유지). 체력바는 반전하지 않으며 뿔·불꽃을 포함한 그림 위에 둔다. 피격 시 기존 0.08초 동안 그림을 밝게 하며 AI·원형 충돌·공격·보상은 기존 시스템이 맡는다.
 
-건설(D-022)은 `BuildingDB`의 `category`(벽·공성탑·생활 탭)·`tier`(필요한 제작대 단계)·`outside`(영토 밖 가능)로 나뉜다. `Kingdom.tech_error()`가 잠금 검증을 맡고, `teleports()`·`find_teleport_near()`·`can_deposit_at()`(핵·보급소)이 생활 건물을 찾는다. 순간이동 탑 창(`TeleportPanel`)은 E로 열리며 이동은 `Player.teleport_to()`로 각자 정한다. 감시탑은 `World.reveal_area()`로 지도를 밝히고 `cells_explored`로 모두에게 전한다. 모닥불 회복은 각자의 `Main`이 내 캐릭터에 적용한다. 새 건물 그림은 원본 칸에 `tint`만 입힌다(임시).
+건설(D-022)은 `BuildingDB`의 `category`(벽·공성탑·생활 탭)·`tier`(필요한 왕국 방어 단계, D-027)·`outside`(영토 밖 가능)로 나뉜다. `Kingdom.tech_error()`가 잠금 검증을 맡고, `teleports()`·`find_teleport_near()`·`can_deposit_at()`(핵·보급소)이 생활 건물을 찾는다. 순간이동 탑 창(`TeleportPanel`)은 E로 열리며 이동은 `Player.teleport_to()`로 각자 정한다. 감시탑은 `World.reveal_area()`로 지도를 밝히고 `cells_explored`로 모두에게 전한다. 모닥불 회복은 각자의 `Main`이 내 캐릭터에 적용한다. 새 건물 그림은 원본 칸에 `tint`만 입힌다(임시).
 
-보스 7종(D-021)은 보스 행을 함께 쓰고 `EnemyDB`의 `tint`로 색만 다르다(임시). 보스 패턴은 `Enemy`가 `patterns`·`rage` 데이터를 읽어 호스트에서만 실행한다. 탄은 `Projectile`(적 탄 → `enemy_shot`으로 참가자에게 복제), 소환은 부모 노드에 `Enemy`를 추가한다. 패턴에는 무작위가 없다.
+보스 7종(D-021)은 `assets/enemies/bosses.aseprite`·PNG(1024×896)의 128×128 고유 외형·8프레임을 쓴다. 원본은 56프레임·ID별 태그·접지 그림자/몸체/문양 레이어로 나뉜다. `EnemyDB.sprite_row`·`sprite_top`은 각 보스의 행·전체 프레임 최상단이다. Enemy의 `sprite_texture`·`sprite_region`·`sprite_offset`·`animation_frames`를 로컬/EnemyPuppet이 공유한다. 그림 원점(-64,-104), 충돌은 원래 반경을 유지하며 몸·장식은 기존 배치 기준점에 묶어 Y 정렬한다. 기존 분노 체력 조건에서만 호흡 속도(최대 1.5배)·밝기를 강조하고 피격/돌진 예고는 기존 번쩍임을 쓴다. 일반 적은 기존 64×64·4프레임을 유지하며 과거 공통 보스 행은 최초 원본으로 보존한다. 보스 패턴은 `Enemy`가 `patterns`·`rage` 데이터를 읽어 호스트에서만 실행한다. 탄은 `Projectile`(적 탄 → `enemy_shot`으로 참가자에게 복제), 소환은 부모 노드에 `Enemy`를 추가한다. 패턴에는 무작위가 없다.
 
-무기 5종과 폭탄은 `assets/combat/weapons.aseprite`·PNG(512×384)를 쓴다. 64×64의 가로 8칸(대기 1 + 공격·회복 7), 세로 6행(낡은 검·흑요석 검·낡은 활·산탄 석궁·화염 지팡이·폭탄 주머니)이다. `WeaponArtDB`가 행·피벗·연출 시간·반동을 정의한다. `WeaponVisual`은 Player와 RemotePlayer가 공유하며 무기와 장갑을 몸 뒤에 그리고 몸에 짧은 이동·기울기 반동을 준다. 공격 시 장비·방향을 저장하며 무기 교체 시 이전 모션을 끝낸다. 두 검의 0.12초 궤적은 첫 프레임부터 기존 사거리·부채꼴을 표시한다. 휩쓸기 패시브로 넓어진 각도는 칼끝 사거리를 유지하며 궤적 양 끝을 확장해 표현하고, 원격 플레이어는 전달받은 패시브 단계로 같은 그림을 그린다. 활은 시위 복귀·재장전, 석궁은 반동·발사 섬광, 지팡이는 시전, 폭탄은 투척·작은 주머니 회복 자세를 쓴다. 기존 낡은 검 단독 PNG·Aseprite와 4프레임 궤적은 최초 원본으로 보존한다.
+무기 34종은 `assets/combat/weapon_tree.aseprite`·PNG(512×2176)의 64×64·8프레임 고유 외형을 쓴다. 대검·쌍검·수호검, 장궁·연사궁, 산탄·공성 석궁, 화염·서리·번개 지팡이는 실루엣·재질·강화 장식을 구분한다. `WeaponArtDB`가 행·피벗(20,32)·모션 시간·반동·검 궤적을 정의하고 `WeaponVisual`을 Player/RemotePlayer가 공유한다. 두 플레이어 모두 몸 Sprite2D·착용 장비를 먼저 추가하고 무기를 다음 형제로 그려 무기가 몸 위에 보인다. 무기에 별도 Z를 주지 않아 다른 월드 물체와의 Y 정렬은 그대로 유지한다. 손에 드는 무기·폭탄 주머니 그림만 HELD_SCALE=0.5로 줄여 64×64 원본 칸을 32×32로 표시한다. 손잡이 피벗도 같은 비율로 적용해 기준점을 고정하며 대기·공격·원격 표시가 동일하다. 노드 전체를 축소하지 않아 검 궤적·몸 반동·아이콘·투사체·실제 공격 사거리는 유지한다. 기본 검·활·석궁·지팡이도 각각 독립 행을 사용하며 폭탄 주머니는 최초 `weapons` 시트를 보존한다. `ItemArtDB.icon`은 무기 대기 외형에서 아이콘을 가져와 장비창·제작·상자가 같은 모양을 보여준다.
 
-`projectiles.aseprite`·PNG(128×192)는 32×32의 4프레임×6행(화살·볼트·작은 화염탄·화염구·폭탄·적 마법탄)이다. Projectile의 `art_id`는 그림만 고른다. 폭탄의 높이·회전은 그리기 변환뿐이며 기존 지면 경로·수명·범위를 유지한다. `attack_effects.aseprite`·PNG(768×640)는 128×128의 6프레임×5행(강철 검 궤적·흑요석 검 궤적·명중·폭발·화염 명중)이다. `CombatEffect`는 명중·폭발을 재생 후 제거하며 피해를 계산하지 않는다. Main이 `Events.combat_effect_requested`를 받아 생성하고 CombatSync가 호스트 확정 결과를 참가자에게 전달한다. 폭발 그림 크기는 실제 폭발 반경을 따른다.
+`weapon_tree_projectiles`는 32×32·4프레임×25종(관통/연사 화살·산탄·공성탄·원소탄·강화 스킬탄), `weapon_tree_effects`는 128×128·6프레임×25종(계열별 검 궤적·내려찍기·돌진 베기·반격·화살비·포격·서리 고리·낙뢰·번개 연결·명중)이다. 기존 `projectiles`·`attack_effects`도 기본 탄·폭탄·기존 효과에 계속 쓴다. 실제 그림은 `WeaponArtDB.weapon_texture/projectile_texture/effect_texture`와 각 region으로 고른다. 무기 스킬 8종은 `weapon_skill_icons`의 32×32 아이콘을 하단 바에 쓴다. Aseprite 원본과 재현 도구 `tools/build_weapon_tree_art.lua`를 함께 보관한다.
 
-PlayerSync는 장착 무기를 기존 위치 상태에 싣고 `Player.attack_visual_requested`로 시작한 모션을 다른 화면에도 보낸다. CombatSync는 플레이어의 실제 아군 탄을 쏜 사람 외의 참가자에게 `visual_only` 복제본으로 보여준다. 복제본은 월드·적 체력·보상을 바꾸지 않고, 명중·폭발 그림은 호스트 결과로 한 번 전달한다. 로컬 공격·피해·공격 속도·채집은 기존 Player·Melee·Projectile 명령 경로를 유지한다.
+PlayerSync는 장착 무기·공격 모션과 `Player.weapon_effect_requested`의 스킬 그림을 공유한다. 스킬 그림 RPC는 ID·위치·크기·거리·유한값을 검사하고 피해 명령을 실행하지 않는다. CombatSync는 아군 탄을 발사자 외 화면에 `visual_only`로 보여주며 명중·폭발·연쇄 번개는 호스트 확정 결과로 전달한다. `CombatEffect`는 기존 패시브와 신규 무기 효과의 지연 생성 예약을 합쳐 표시 한도를 지킨다. 효과가 수명 후 사라져도 실제 피해·속도·쿨타임·범위·강화 효과는 ItemDB와 기존 전투 명령 경로를 유지한다.
 
 왕국 핵 `Core`는 `_draw()`에서 `assets/kingdom/castle.png`를 원래 크기(96×128)로 그린다. 원본은 같은 폴더의 `castle.aseprite`이며 기단·중앙 성채·성문과 전면 성벽·양쪽 첨탑·깃발과 횃불 레이어로 나뉜다. 그리기 위치 `(-48, -84)`는 기단을 기존 96×96 충돌 영역 안에 맞추고 탑을 위로 올린다. 충돌·체력·조명·멸망 처리는 기존 `Core`가 맡는다.
 
@@ -147,7 +150,7 @@ HUD 왼쪽 위는 낮·밤 시계와 성·내 체력 두 줄을 상시 표시한
 | `Player` ↔ `Skills` | `Skills.cast(skill, player)` | 스킬 효과가 플레이어를 직접 조작 |
 | `Enemy` ↔ `Projectile` | 서로 생성·피격 | 보스 탄막, 투사체 피격 |
 | `Building` → `Enemy` | 화살탑 조준 | 그룹 조회로 대체 가능 |
-| 개인 가방·장비 가방·경험치를 각자 소유 | `Player.inventory`·`equipment`·`progression`, `KingdomSync`의 요청 | 호스트가 정하는 것(월드·왕국·보상 추첨)과 달리 참가자 화면에 있다. 참가자는 요청에 가방 내용을 실어 보내고 호스트는 그 값을 믿는다(임시, D-017). 패시브 단계는 각자 정하고 `PlayerSync`로 알린다. 호스트는 받은 단계(`RemotePlayer.ranks`)를 믿고 약탈자·보물 사냥꾼·건설 패시브에 쓴다(D-020) |
+| 개인 가방·장비 가방·경험치·레벨을 각자 소유 | `Player.inventory`·`equipment`·`progression`, `KingdomSync`의 요청 | 호스트가 정하는 것(월드·왕국·보상 추첨)과 달리 참가자 화면에 있다. 참가자는 요청에 가방 내용을 실어 보내고 호스트는 그 값을 믿는다(임시, D-017). 패시브 단계는 각자 정하고 `PlayerSync`로 알린다. 호스트는 받은 단계(`RemotePlayer.ranks`)를 믿고 약탈자·보물 사냥꾼·건설 패시브에 쓴다(D-020) |
 
 ## 6. 멀티플레이 구조 (목표, 미구현)
 
@@ -165,8 +168,8 @@ HUD 왼쪽 위는 낮·밤 시계와 성·내 체력 두 줄을 상시 표시한
 - 노드가 트리에 붙기 전에 `set_physics_process(false)`를 불러도, `_physics_process`를 정의한 노드는 `_ready` 때 Godot이 다시 켠다. 켜고 끌 조건은 `_ready()`에서 정한다 (`WorldSync`, `KingdomSync`).
 - 투사체는 `Area2D` 겹침 신호 대신 매 물리 프레임 `intersect_shape`로 직접 충돌을 조회한다. `Area2D` 신호로는 타일·벽·핵 같은 정적 바디가 감지되지 않았기 때문이다.
 - 타일 충돌은 여러 칸이 한 바디로 묶여 있어서, 맞은 칸은 `World.object_cell_near()`로 위치를 보고 찾는다.
-- 월드는 192×192칸 단일 배열(`WorldData`)이다. 이 크기에서는 청크 로딩이 필요 없어서 없다(D-006).
-- 충돌 레이어: 1 water, 2 objects, 3 buildings, 4 player, 5 enemies (`PhysicsLayers` = `project.godot [layer_names]`).
+- 월드는 288×288칸 단일 배열(`WorldData`)이다(D-032에서 192에서 키움). 이 크기에서는 청크 로딩이 필요 없어서 없다(D-006).
+- 충돌 레이어: 1 water, 2 objects, 3 buildings, 4 player, 5 enemies, 6 passable (`PhysicsLayers` = `project.godot [layer_names]`). passable은 벽을 뺀 모든 건물(`BuildingDB.player_passable()`, D-036)이 쓴다. 플레이어(`main.tscn` mask 7)는 이 레이어를 보지 않아 지나가고, 적 몸·적 탄은 막혀서 부순다 (D-025).
 - 입력은 `InputBindings.register()`가 `Session._ready()`에서 런타임에 등록한다. 그래서 `--script`로 실행한 테스트에는 입력 액션이 없다.
 
 ### 시작 화면·패시브 그래픽 (2026-10-26)
@@ -183,7 +186,7 @@ HUD 왼쪽 위는 낮·밤 시계와 성·내 체력 두 줄을 상시 표시한
 
 `BuildMenu`는 MenuArt 테마의 1232×672 도감을 창에 맞춰 축소한다. 세 분류의 `BuildCard`를 선택하면 `BuildPreview`와 오른쪽 설명·체력·기본 공격 수치·재료 필요/보유·해금 조건을 갱신한다. 잠긴 카드도 상세 확인 가능, 설치 모드 진입은 불가다. 자원 부족 때는 미리보기 가능하며 실제 지불·검증은 기존 Kingdom 명령에 남는다. 가방+창고 수량과 테크를 열려 있는 동안 0.25초마다 읽는다. 신규 그룹·오토로드는 없다.
 
-`ItemArtDB`는 assets/ui/equipment_items의 48×48·5열×3행 아이콘 15종과 재료 아이콘을 공유한다. 무기 5종·폭탄은 기존 무기 대기 그림에서 같은 픽셀을 가져왔고 방패·모자·투구·갑옷·신발·부적·뿔피리는 새 그림이다. 장비창·제작·상자가 같은 아이콘을 쓰며 상자는 고정 높이 스크롤과 호버 상세를 제공한다. 석탄·송진·보스 정수는 construction_materials에 추가했다.
+`ItemArtDB`는 무기 34종의 실제 대기 자세 아이콘과 assets/ui/equipment_items의 비무기 10종·재료 아이콘을 공유한다. 방패·모자·투구·갑옷·신발·부적·뿔피리와 폭탄 주머니는 기존 아이콘을 유지한다. 장비창·제작·상자가 같은 아이콘을 쓰며 상자는 고정 높이 스크롤과 호버 상세를 제공한다. 석탄·송진·보스 정수는 construction_materials에 추가했다.
 
 `EquipmentVisual`은 몸 Sprite2D의 자식으로 비무기 10종의 24×24·12자세(정면/뒷면/측면 × 걷기4) 오버레이를 그린다. 몸의 반동·숨김을 상속하고 좌우 반전은 같은 상태로 적용한다. Player의 Equipment.changed가 읽기 전용 외형을 갱신한다. PlayerSync가 기존 위치/무기 상태에 직렬화 가능한 장착 ID 사전을 추가해 RemotePlayer도 같은 그림을 쓴다. ID·슬롯을 검사하며 능력치나 피해를 변경하지 않는다. RPC는 계속 src/multiplayer에만 있다.
 
@@ -196,3 +199,72 @@ HUD 왼쪽 위는 낮·밤 시계와 성·내 체력 두 줄을 상시 표시한
 로컬 캐릭터 연출은 Player.show_passive가 동일 계열 0.6초 간격으로 만들고 PlayerSync의 전용 외형 RPC로 다른 화면에만 보낸다. ID/위치/범위/유한값을 검사한다. 호스트가 확정하는 월드 연출은 기존 Events.combat_effect_requested→CombatSync 경로를 사용한다. 두 경로는 각각 캐릭터 시전과 월드 결과를 맡으며 같은 결과를 재실행하지 않는다. 동시에 보이는 패시브 효과는 fx_layer 자식 수 48개를 기준으로 제한한다. 신규 그룹·오토로드 없음.
 
 패시브 표시 한도는 fx_layer의 예약 메타데이터를 함께 센다. 지연 add_child가 실행되기 전에 예약하므로 요새화로 같은 프레임에 요청이 몰려도 상한을 넘지 않는다. 예약 값도 한 판의 fx_layer와 함께 사라진다.
+
+
+## 보스전 음악
+
+`Main`이 `MusicPlayer`와 자식 `AudioStreamPlayer`를 한 판 아래에 소유한다. `SoundDB.BOSS_MUSIC`·음량·페이드 시간을 `setup()`으로 주입하고, 기존 `boss_status()`로 호스트의 Enemy 또는 참가자의 EnemyPuppet이 있는 동안 활성화한다. 보스가 아침까지 남아 있으면 계속 재생하며 마지막 보스가 사라지거나 승리·멸망 화면이 열리면 페이드아웃한다. 승패 판정이나 별도 음악 RPC는 추가하지 않는다.
+
+`MusicPlayer`는 게임 규칙·월드·난수를 참조하지 않는다. 일시정지 중에도 처리해서 활성 음악은 `stream_paused`로 위치를 보존하고, 비활성화된 음악의 종료 페이드는 끝낸다. 페이드는 hitstop의 게임 속도와 무관한 실제 시간을 쓴다. 페이드 도중 새 보스가 나타나면 기존 트윈을 취소해 이전 stop 콜백이 음악을 끊지 않게 한다. 씬이 해제되면 음악도 함께 해제된다. 새 오토로드·버스·그룹은 없다.
+
+
+## 게임 화면 경험치·레벨 표시
+
+`Hud`가 상단 왼쪽 상태창 안에 축소된 `ProgressionHud`를 소유하고 개인 `Progression`을 setup으로 주입한다. `changed` 신호에서 레벨·이번 레벨의 경험치/필요량·패시브 포인트를 읽는다. 진행바는 현재 레벨의 실제 비율을 쓰며 경험치 획득만 짧게 보간하고, 레벨업에는 왕관 배지·테두리를 잠시 강조한다. 경험치 감소는 즉시 표시한다. 학습·경험치·사망 규칙은 기존 `Progression`이 소유한다.
+
+포인트 버튼은 `passive_requested` 로컬 신호로 기존 K 패시브 창을 연다. Hud의 포인터 판정에 패널을 포함해 클릭이 월드 기본 공격으로 이어지지 않게 한다. 캐릭터 외형·체력·보스 체력바와 겹치지 않도록 상단 상태창의 체력바 아래에 통합한다. 크기는 252×44로 줄이고, 작은 창에서는 펼친 재화 영역만 스크롤해 화면 밖으로 나가지 않게 한다. 그림은 `assets/ui/progression_hud.aseprite`·PNG(128×64)의 일반/성장 왕관 배지, 보라색 경험치바 테두리/채움을 사용한다. 게임용 난수나 네트워크 상태를 바꾸지 않는다.
+
+
+## 월드 앞뒤 그리기 순서
+
+`main.tscn`의 Main·World·Objects(TileMapLayer)·Kingdom·Enemies가 중첩 Y 정렬을 사용한다. 플레이어, Main에 붙는 RemotePlayer, Enemies 아래의 Enemy/EnemyPuppet, Kingdom 아래의 성·건물, Objects의 각 생성물 타일은 같은 Z=0에서 배치 기준점의 전역 Y를 비교한다. 화면 아래쪽(Y가 큰 쪽)을 나중에 그린다. 생성 순서·나무 높이·건물 그림의 상단 위치로 우선순위를 정하지 않는다. 같은 Y일 때는 기존 트리 순서로 결정된다.
+
+개별 캐릭터·건물의 Y 정렬은 켜지 않는다. 몸·장비·무기·체력바는 각 객체의 기준점에 묶어서 기존 내부 순서를 보존한다. Terrain은 Z=-1, 투사체는 1, 전투 효과는 2, 핑은 3, 설치 미리보기는 4다. 채집물 체력바 overlay는 기존 Z=1을 유지하고 HUD는 CanvasLayer를 사용한다. 씬 노드를 이동하거나 RPC 경로·충돌·월드 상태·그림 위치를 바꾸지 않는다.
+
+### 왕국 핵 창 (D-027)
+
+`KingdomPanel`은 핵 옆에서 E로 열린다(건물이 더 가까우면 그 건물 창이 먼저). 제작대 강화(`Kingdom.upgrade_workbench`, 몬스터 재료)·방어 강화(`upgrade_defense`, 채집 재료)·영토 확장(`expand_territory`, 둘 다)·수리(`repair`)를 `KingdomSync`의 같은 이름 메서드로 부른다. 참가자 요청은 호스트가 같은 명령 메서드로 검증하고, `defense_tier`·`territory_level`은 `Kingdom.snapshot()`으로 전한다. 모든 명령은 `Kingdom.core_use_error()`(핵에서 `Balance.CORE_USE_RANGE`)로 거리를 검사한다. 영토 반지름은 `Kingdom.territory_radius()`가 정하며 건설 범위·경계 그림·적의 낮 경계(`Enemy.in_kingdom`)·침공 등장 위치·배회 적 등장 거리가 모두 이 값을 따른다. 월드 생성의 시작 지역 크기는 기본 반지름(`Balance.TERRITORY_RADIUS`)을 그대로 쓴다.
+
+
+
+### 왕국 집무실 그래픽·제작 창 정리
+
+`KingdomPanel`은 성채·영토 링 미리보기, 실제 핵 체력과 제작대/방어/확장 현황, 네 운영 카드(제작대 강화·방어 강화·영토 확장·수리)를 MenuArt 픽셀 테마로 표시한다. `assets/ui/kingdom_ui.aseprite`·PNG(256×64)의 전용 아이콘·왕관 문장과 기존 성채 원본을 사용한다. 카드는 보유/필요 재료 아이콘·가방/창고 툴팁·부족/완료 조건을 보여주고 기존 KingdomSync 명령만 호출한다. 열려 있는 동안 호스트의 상태·자원·수리 패시브 값을 주기적으로 반영한다.
+
+`CraftingPanel`에서는 제작대 강화 버튼·비용·설비 패널을 제거했다. 장비 목록과 제작 상세의 2열로 줄였고 현재 제작대 단계와 레시피 잠금 설명만 남긴다. 강화는 기존 D-027대로 핵 E 창에서 한다. 새 신호·오토로드·RPC·성장 규칙은 추가하지 않는다.
+
+### 무기 트리 (D-028)
+
+무기는 `ItemDB`(능력치·`concept`·우클릭 `skill`)와 `RecipeDB`(`tier`·`from`)로 정의한다. `Kingdom.craft()`는 "from"이 있으면 `Equipment.replace_item()`으로 이전 무기를 새 무기로 바꾼다(들고 있으면 손에서, 아니면 가방에서). 새 효과는 데이터 키로 켠다: 투사체 `knockback`·`pierce_ramp`·`chain`·`second_blast`(`Projectile`), 범위 공격의 감속·기절(`Melee.blast`의 `slow_factor`·`slow_time`, `Player.blast_at`), 돌진(`Player.lunge`), 반격 자세(`Player.activate_counter`). 스킬 효과는 `Skills.cast()`에 있고, 여러 번 떨어지는 스킬은 `Skills._later()`로 일시정지를 따르는 타이머를 쓴다. 그림이 없는 무기는 `WeaponArtDB.art()`·`basic_projectile()`, `ItemArtDB.icon()`이 계열 기본 그림을 돌려준다.
+
+
+### 미니맵·재료 가방 표시
+
+Hud의 우상단 `MapView.mini`는 192×224의 황동 지도 프레임과 160×160 탐험 영역을 쓴다. `MapView._map_rect`를 그리기·클릭 좌표 변환에 공통으로 사용하고 전체 지도/전략회의의 기존 영역은 유지한다. 성·플레이어·침공·순간이동 탑·핑은 `assets/ui/minimap_ui`의 픽셀 표식을 공유한다. 탐험 정보와 핑 규칙은 MapState·MapSync가 계속 소유한다.
+
+미니맵 왼쪽 `Hud.BagGauge`는 96×84의 가죽 가방과 사용/전체 칸·적재율을 표시한다. Inventory.used_slots/capacity를 읽어 빈 칸·부분 스택·큰 가방·입고/사망 초기화를 반영한다. 80% 이상은 금색, 만원은 붉은색과 ‘가득 참’ 문구로 구분하며 누르면 기존 재료 목록을 펼친다. 가방 영역 클릭은 기본 공격으로 전달하지 않는다. 재료 변경·입고·수용량 규칙을 소유하지 않는다. 원본은 `minimap_ui.aseprite`, 재현은 `tools/build_minimap_art.lua`다.
+
+### 무기 타격감 (D-029)
+
+`WeaponArtDB.FEEL`이 갈래별 멈칫·화면 흔들림·공격 반동을 정한다. 반동은 `Player._fire_weapon()`이 `add_kick()`으로 바로 낸다. 맞혔을 때의 느낌은 `Events.damage_dealt`의 `source`(때린 peer id)가 내 것일 때만 `Main.show_damage()`가 낸다. 참가자는 호스트가 묶어 보내는 피해 숫자에 실린 `source`로 같은 판단을 하므로, 피해는 호스트가 정하고 느낌은 각자 화면에서만 난다. 근접 넉백은 무기 데이터의 `knockback`을 따른다.
+
+### 환경 설정 (D-030)
+
+`GameSettings`(RefCounted)가 볼륨·UI 크기·전체 화면·수직 동기화·흔들림·피해 숫자·멈칫 값을 가지고 `user://settings.cfg`에 저장한다. `Session.settings`가 하나를 소유하고, 값이 바뀌면 `apply()`가 오디오 버스(실행할 때 코드로 만드는 `Music`·`SFX`, `MusicPlayer`·`SoundEffects`·시작 화면 음악이 보냄)·창 배율·창 모드에 반영한다. UI 크기는 `Window.content_scale_factor`로 바꾸고 `Main._apply_settings()`가 플레이어 카메라 줌을 그만큼 되돌려 월드 크기는 유지한다. 흔들림 배율은 `Player.shake_scale`, 피해 숫자·멈칫은 `Main`이 읽는다. 게임 중에는 아무 창도 없을 때 Esc가 `PauseMenu`를 열고(게임은 멈추지 않음) 그 안에서 `SettingsPanel`을 연다. 시작 화면에도 같은 설정 창이 있다. 테스트는 `settings.path`를 테스트 파일로 바꾸고 기본값으로 시작한다.
+
+### 전체 지도·전략회의 창 그래픽 (2026-10-26)
+
+전체 지도(M)는 `WorldMapPanel`이 맡는다. MenuArt 판 왼쪽에 `MapView`(지도 액자), 오른쪽에 미니맵 표식 범례와 일차·영토 반지름·탐험 비율을 1초마다 읽어 보여준다. `Hud.toggle_big_map()`·`close_big_map()`·`is_big_map_open()`으로 열고 닫으며, 열려 있으면 `Main`이 기본 공격을 막는다. 전략회의(T) `MeetingPanel`은 같은 판·액자·범례 함수(`WorldMapPanel.section()`·`icon()`·`label()`)를 쓰고, 핑·준비·재개 흐름(MapSync·MeetingSync)은 바꾸지 않았다. 새 오토로드·그룹·네트워크 상태는 없다.
+
+### E 상호작용 대상 고르기 (D-031)
+
+`Main.interactables()`가 내 캐릭터 주변에서 E로 열 수 있는 것(장비 상자·제작대·순간이동 탑은 `Balance.USE_REACH`, 왕국 핵은 `CORE_USE_RANGE`, 보물 상자는 둘레 한 칸)을 모으고, `interact_target(마우스 월드 좌표)`가 하나면 그것, 여럿이면 마우스에 가장 가까운 것을 고른다. `_interact()`와 월드 위 안내(`InteractPrompt`, "E 이름" 표와 금색 모서리)가 같은 함수를 써서 보이는 대상과 열리는 대상이 항상 같다. 안내는 기본 공격이 막힌 상태(창·설치 모드)에서는 숨는다. 테스트는 `Main.mouse_override`로 마우스 위치를 정한다.
+
+### 건물 야간 조명 강도
+
+Fx.add_light(owner, radius, energy_scale=1.0)는 광원별 표시 강도를 메타데이터로 보관하고 DayNight는 darkness×LIGHT_ENERGY×광원 강도로 매 프레임 갱신한다. 건물은 기존 반경의 65%·강도 0.3, 왕국 핵은 반경 210px·강도 0.35로 겹친 빛의 과다 노출을 줄인다. 플레이어와 원격 플레이어는 기본 강도 1.0·기존 반경을 쓴다. 낮 0과 황혼/새벽 보간은 광원별 배율에도 그대로 적용한다. 조명은 연출이며 탐험·치유·공격 사거리·호스트 판정은 바꾸지 않는다.
+
+### 아침 재생과 서식 몬스터 (D-035)
+
+`WorldGenerator`는 자원을 `RESOURCE_DENSITY`(25%)만큼만 만들고 바이옴·종류별 개수를 `WorldData.resource_targets`에 남긴다. 호스트의 `Main._on_day_started()`가 `World.regrow(rng, blocked)`로 모자란 만큼 다시 자라게 하고 `WorldSync.send_regrowth()`로 참가자에게 `World.apply_grown()`을 시킨다. `WaveSpawner`는 시작할 때 지형별 칸 목록과 서식 수를 정하고(`_plan_residents`), 첫 낮과 매일 아침 `refill_residents()`로 채운다. 서식 몬스터는 `Enemy.home`·`home_terrain`을 가지고 집 근처를 돌아다닌다(`Balance.RESIDENT_*`). 참가자 쪽 생성기는 꺼져 있어 아침 신호가 와도 채우지 않는다(`can_process()`).
+

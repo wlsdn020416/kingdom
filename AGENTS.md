@@ -7,7 +7,7 @@
 
 - 게임: 2~4인 협동, 탑다운 2D 픽셀아트 생존·왕국 디펜스. 기획 원본은 `docs/기획서.md`.
 - 루프: 낮에는 탐험·채집·건설, 밤에는 침공 방어. 최종 보스 처치가 목표, 왕국 멸망 시 그 판은 끝나고 완전 초기화.
-- 조작: WASD 이동, 마우스 조준, 좌클릭 기본 공격, Space 대시(기본 능력), 숫자키 1~4 = 장착 장비의 액티브 스킬(스킬 있는 장비만 빈칸 없이).
+- 조작: WASD 이동, 마우스 조준, 좌클릭 기본 공격, 우클릭 무기 스킬(스킬 있는 무기만), Space 대시(기본 능력), 숫자키 1~4 = 무기를 뺀 장착 장비의 액티브 스킬(스킬 있는 장비만 빈칸 없이).
 - 엔진: **Godot 4.7** (`project.godot`의 `config/features`), 이 기기에서는 `godot` = 4.7.2.stable (`/opt/homebrew/bin/godot`).
 - 언어: GDScript만 사용. C# 없음. 외부 GDExtension은 Steam 연동용 GodotSteam 하나만 허용(`addons/godotsteam/`, D-016). 그 밖의 애드온은 상의 후 결정 기록과 함께 추가.
 - 현재 상태: 1인용 플레이 가능 프로토타입(전투, 낮/밤, 침공, 건설, 장비, 월드 생성, 지도). 멀티플레이와 픽셀아트는 아직 없다. 자세한 단계는 `docs/ROADMAP.md`.
@@ -18,8 +18,8 @@
 
 | 폴더 | 책임 | 비고 |
 | --- | --- | --- |
-| `scenes/` | 진입점과 메뉴 씬. `title.tscn`(시작 화면), `main.tscn`(한 판, 시스템 조립) | `main.gd`가 조립 지점(composition root) |
-| `src/core/` | 전역 시스템: `Events`·`Session` 오토로드, 입력 배치, 충돌 레이어, 임시 이펙트, 공용 체력바 그리기(`HealthBarArt`), 주입받은 효과음 재생(`SoundEffects`) | 게임 규칙을 넣지 않는다 |
+| `scenes/` | 진입점과 메뉴 씬. `title.tscn`(시작 화면), `main.tscn`(한 판, 시스템 조립) | `main.gd`가 조립 지점(composition root), `main.tscn`은 월드 물체의 공통 Y 정렬·연출 깊이를 정의 |
+| `src/core/` | 전역 시스템: `Events`·`Session` 오토로드, 입력 배치, 충돌 레이어, 임시 이펙트, 공용 체력바 그리기(`HealthBarArt`), 주입받은 효과음 재생(`SoundEffects`)·반복 음악 페이드/일시정지(`MusicPlayer`)·화면별 커서(`CursorArt`)·환경 설정 값과 저장(`GameSettings`, `Session`이 소유) | 게임 규칙을 넣지 않는다 |
 | `src/world/` | 월드 데이터·생성·타일맵·색 | `WorldData`, `WorldGenerator`는 노드 없음 |
 | `src/characters/` | 플레이어, 장비(`Equipment`), 착용 외형(`EquipmentVisual`), 개인 자원(`Inventory`), 경험치·패시브(`Progression`) | |
 | `src/combat/` | 투사체, 장비 스킬 효과, 로컬·원격 공용 무기 모션(`WeaponVisual`), 일회성 명중·폭발·패시브 발동 그림(`CombatEffect`) | |
@@ -28,9 +28,9 @@
 | `src/gameplay/` | 낮/밤, 웨이브, 상자 보상, 공유 지도 상태, 핑 | |
 | `src/multiplayer/` | 네트워크 연결과 동기화: Steam 연결(`SteamService`), 접속·명단(`NetSession`, 둘 다 `Session`이 자식으로 소유), 게임 씬 동기화(`PlayerSync`·`RemotePlayer` 플레이어, `CombatSync`·`EnemyPuppet` 적·시간·핵·효과음, `WorldSync` 나무·바위·상자, `KingdomSync` 창고·건물·장비 상자·제작대, `MapSync` 탐험 칸·핑, `MeetingSync` 전략회의) | RPC는 이 폴더에만 (D-017) |
 | `addons/godotsteam/` | GodotSteam GDExtension (외부, MIT). macOS·Win64·Linux64 라이브러리만 포함 | 직접 고치지 않는다. 버전 교체는 D-016 절차 |
-| `src/ui/` | HUD, 스킬바, 건설 도감(`BuildMenu`·`BuildCard`·`BuildPreview`), 지도, 마네킹형 장비·소지품 창, 장비 상자 창, 제작대 창, 순간이동 탑 창, 보스 체력바·침공 예고(`ThreatBanner`), 패시브 창, 전략회의, 멸망 화면, 공용 UI 생성 함수(`UiKit`), 방사형 패시브(`PassiveTree`·`PassiveNode`), 시작·패시브·건설 테마(`MenuArt`) | |
+| `src/ui/` | HUD, 스킬바, 경험치·레벨 표시(`ProgressionHud`), 건설 도감(`BuildMenu`·`BuildCard`·`BuildPreview`), 지도, 마네킹형 장비·소지품 창, 장비 상자 창, 제작대 창, 순간이동 탑 창, 왕국 집무실(`KingdomPanel`, 핵 E), Esc 메뉴(`PauseMenu`)·환경 설정 창(`SettingsPanel`), 전체 지도 창(`WorldMapPanel`, M), E 상호작용 안내(`InteractPrompt`), 보스 체력바·침공 예고(`ThreatBanner`), 패시브 창, 전략회의, 멸망 화면, 공용 UI 생성 함수(`UiKit`), 방사형 패시브(`PassiveTree`·`PassiveNode`), 시작·패시브·건설 테마(`MenuArt`) | |
 | `data/` | 밸런스 수치와 아이템·적·건물·레시피·패시브 정의 | 숫자 조정은 여기서만 |
-| `assets/` | 이미지·오디오·폰트. `branding/`(로고, 게임 아이콘), `fonts/`(Kingdom Dot 파생 글꼴·OFL·원본), `audio/music/`(메뉴 BGM·생성 원본·편집 기록), `characters/`(캐릭터 원본·시트, D-012), `kingdom/`(성·건설물 원본·PNG), `world/`(바닥 타일·생성물 원본·PNG), `combat/`(무기·공격 이펙트 원본·PNG), `ui/`(체력바·마네킹·슬롯·재료 아이콘 원본·PNG), `enemies/`(적 원본·시트), `audio/sfx/`(기본 효과음 WAV·생성 원본·목록·미리듣기) | 나머지 스프라이트는 M3(픽셀아트)에서 기능별 하위 폴더로 추가 |
+| `assets/` | 이미지·오디오·폰트. `branding/`(로고, 게임 아이콘), `fonts/`(Kingdom Dot 파생 글꼴·OFL·원본), `audio/music/`(메뉴·보스전 BGM·생성 원본·편집 기록), `characters/`(캐릭터 원본·시트, D-012), `kingdom/`(성·건설물 원본·PNG), `world/`(바닥 타일·생성물 원본·PNG), `combat/`(무기·공격 이펙트 원본·PNG), `ui/`(체력바·레벨 배지·경험치바·마네킹·슬롯·재료 아이콘 원본·PNG), `enemies/`(일반 적·보스 7종 원본·시트·배치 기록), `audio/sfx/`(기본 효과음 WAV·생성 원본·목록·미리듣기) | 나머지 스프라이트는 M3(픽셀아트)에서 기능별 하위 폴더로 추가 |
 | `tests/` | 자동 검사(`run_all.sh`로 전부 실행) | `docs/TESTING.md` |
 | `tools/` | 개발 보조 스크립트(예: `world_stats.gd`) | 게임에 포함되지 않음 |
 | `docs/` | 기획서(`기획서.md`), 아키텍처·결정·로드맵·테스트 문서 | 기획서는 사용자가 관리 |
@@ -58,9 +58,9 @@
 - **Node는 생명주기와 엔진 연결(그리기, 물리, 입력)을 맡는다.** 순수 계산과 규칙은 `RefCounted` 또는 `static func`로 분리한다. 예: `WorldData`·`WorldGenerator`·`Equipment`·`Inventory`·`Progression`·`Loot`는 노드가 아니다.
 - **의존성은 `setup()`으로 주입한다.** 시스템 노드는 필요한 다른 시스템을 `setup(world, kingdom, ...)` 인자로 받는다. 조립은 `scenes/main.gd`에서만 한다. `get_node("../..")`처럼 트리를 거슬러 올라가 다른 시스템을 찾지 않는다.
 - **이벤트는 `Events` 신호로 알린다.** "무슨 일이 일어났다"를 여러 곳이 들어야 할 때(`resources_gained`, `enemy_killed`, `core_destroyed`) 사용한다. 특정 대상에게 명령할 때는 신호가 아니라 메서드를 직접 호출한다. 새 신호는 `src/core/events.gd`에 인자 타입과 `##` 설명을 붙여 추가한다.
-- **그룹은 다수 객체 조회에만 쓴다.** 현재 그룹: `world`, `core`, `player`, `enemies`, `projectiles`, `fx_layer`, `lights`. 새 그룹을 만들면 `docs/ARCHITECTURE.md`에 추가한다.
+- **그룹은 다수 객체 조회에만 쓴다.** 현재 그룹: `world`, `core`, `kingdom`, `player`, `enemies`, `projectiles`, `fx_layer`, `lights`. 새 그룹을 만들면 `docs/ARCHITECTURE.md`에 추가한다.
 - **오토로드는 `Events`, `Session` 두 개뿐이다.** 새 오토로드는 `docs/DECISIONS.md`에 이유를 기록하고 사용자 승인을 받은 뒤에만 추가한다. 상수·정적 함수 모음은 오토로드가 아니라 `class_name` + `RefCounted`로 만든다.
-- **한 판의 상태는 `main.tscn` 아래에만 있다.** 왕국이 멸망하면 씬을 통째로 버려서 초기화한다(`Session`). 오토로드에 판 진행 상태를 저장하지 않는다(`Session.seed_text`, `last_result` 같은 판 사이 정보만 예외).
+- **한 판의 상태는 `main.tscn` 아래에만 있다.** 왕국이 멸망하면 씬을 통째로 버려서 초기화한다(`Session`). 오토로드에 판 진행 상태를 저장하지 않는다(`Session.seed_text`, `last_result` 같은 판 사이 정보와 기기별 환경 설정 `Session.settings`만 예외).
 - **씬은 기능 폴더 안 스크립트 옆에 둔다.** 현재는 대부분 노드를 코드로 만들고(`Enemy`, `Building`, `Projectile`, UI 패널) `_draw()`로 임시 도형을 그린다. 픽셀아트를 넣을 때 해당 객체를 `.tscn`으로 바꾸는 것은 허용되지만, 필요하기 전에 미리 바꾸지 않는다.
 - **게임 데이터는 `data/`에만 둔다.** 현재 형식은 `const Dictionary`다(`docs/DECISIONS.md` D-004). Resource(`.tres`)로의 전환은 계획된 작업이며 결정 기록의 전환 조건을 따른다. 그 전까지 새 항목은 같은 파일의 기존 형식을 그대로 따른다.
 
@@ -69,7 +69,7 @@
 아직 네트워크 코드는 없다. 그러나 지금 작성하는 코드가 나중에 호스트 권한 구조로 옮겨질 수 있도록 아래를 지킨다.
 
 1. **호스트가 최종 결정한다:** 월드 상태(지형·오브젝트·탐험), 전투 결과(피해·사망), 자원 변경, 건설·철거, 게임 시간(낮/밤·웨이브), 보상 추첨, 승패.
-2. **상태 변경은 그 상태를 소유한 시스템의 명령 메서드 한 곳을 거친다.** 예: 건설·철거는 `Kingdom.build()`·`demolish()`, 장비 상자는 `Kingdom.store_item()`·`take_item()`, 제작은 `Kingdom.craft()`·`upgrade_workbench()`, 패시브는 `Progression.learn()`, 자원은 획득 시 `Inventory.add()`(Main이 `Events.resources_gained`를 받아 호출), 창고 입고는 `Kingdom.deposit()`, 지불은 `Kingdom.build()`·`repair()`의 `payer` 인자, 나무·바위 피해는 `World.damage_object()`, 피해는 `Enemy.take_damage()`·`Core.take_damage()`. 입력·UI 코드는 이 메서드를 호출할 뿐 상태 변수를 직접 바꾸지 않는다. 멀티플레이에서는 클라이언트의 요청을 호스트가 받아 같은 메서드를 호출한다. 왕국 명령은 입력·UI가 `KingdomSync`의 같은 이름 메서드를 부르고, 그게 혼자 플레이·호스트면 바로 `Kingdom`을, 참가자면 호스트 요청을 거친다.
+2. **상태 변경은 그 상태를 소유한 시스템의 명령 메서드 한 곳을 거친다.** 예: 건설·철거는 `Kingdom.build()`·`demolish()`, 왕국 핵 창은 `Kingdom.upgrade_workbench()`·`upgrade_defense()`·`expand_territory()`·`repair()`, 장비 상자는 `Kingdom.store_item()`·`take_item()`, 제작은 `Kingdom.craft()`·`upgrade_workbench()`, 패시브는 `Progression.learn()`, 자원은 획득 시 `Inventory.add()`(Main이 `Events.resources_gained`를 받아 호출), 창고 입고는 `Kingdom.deposit()`, 지불은 `Kingdom.build()`·`repair()`의 `payer` 인자, 나무·바위 피해는 `World.damage_object()`, 피해는 `Enemy.take_damage()`·`Core.take_damage()`. 입력·UI 코드는 이 메서드를 호출할 뿐 상태 변수를 직접 바꾸지 않는다. 멀티플레이에서는 클라이언트의 요청을 호스트가 받아 같은 메서드를 호출한다. 왕국 명령은 입력·UI가 `KingdomSync`의 같은 이름 메서드를 부르고, 그게 혼자 플레이·호스트면 바로 `Kingdom`을, 참가자면 호스트 요청을 거친다.
 3. **명령 메서드는 검증을 포함한다.** 비용·범위·쿨타임 확인을 호출하는 쪽(UI)에만 두지 않는다. 클라이언트 요청은 신뢰하지 않는다.
 4. **게임 규칙에 네트워크 코드를 섞지 않는다.** `rpc`, `multiplayer.is_server()`, `MultiplayerSynchronizer`는 `src/multiplayer/` 또는 각 기능의 얇은 동기화 노드에만 둔다. 규칙 코드는 네트워크가 없어도(1인 플레이·테스트) 그대로 동작해야 한다.
 5. **결과에 영향을 주는 무작위는 호스트에서만 굴린다.** 월드 생성은 시드 기반 `RandomNumberGenerator`라서 모든 참가자가 같은 결과를 만든다(`tests/logic_test.gd`로 확인). 보상·드롭·채집량·웨이브 구성처럼 결과를 정하는 무작위는 전역 `randf()`가 아니라 `Main.rng` 하나로 굴리고(규칙 코드는 `rng: RandomNumberGenerator`를 인자나 `setup()`으로 받는다), 호스트에서만 실행해 결과를 전파한다. 화면 흔들림 같은 연출용 무작위는 각자 굴려도 된다.
