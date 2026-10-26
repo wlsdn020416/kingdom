@@ -36,6 +36,6 @@ func _draw() -> void:
 	var font := get_theme_default_font()
 	draw_string(font, Vector2(8, 101), BuildingDB.TYPES[type_id]["name"], HORIZONTAL_ALIGNMENT_CENTER, size.x - 16, 17, MenuArt.TEXT if not locked else MenuArt.MUTED)
 	var tier: int = BuildingDB.TYPES[type_id]["tier"]
-	draw_string(font, Vector2(8, 119), "제작대 %d단계  ·  체력 %d" % [tier, health], HORIZONTAL_ALIGNMENT_CENTER, size.x - 16, 11, MenuArt.MUTED)
+	draw_string(font, Vector2(8, 119), "방어 %d단계  ·  체력 %d" % [tier, health], HORIZONTAL_ALIGNMENT_CENTER, size.x - 16, 11, MenuArt.MUTED)
 	var color := MenuArt.MUTED if locked else MenuArt.GOLD if affordable else Color("d9937d")
 	draw_string(font, Vector2(8, 137), status, HORIZONTAL_ALIGNMENT_CENTER, size.x - 16, 11, color)

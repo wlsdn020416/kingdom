@@ -4,14 +4,14 @@ extends Control
 
 const CONTROLS := [
 	["WASD", "이동"],
-	["마우스", "조준 / 좌클릭 기본 공격 (나무·바위·광석도 공격해서 채집)"],
+	["마우스", "조준 / 좌클릭 기본 공격 (나무·바위·광석도 공격해서 채집) / 우클릭 무기 스킬 (스킬 있는 무기만)"],
 	["Space", "대시 (이동 방향, 멈춰 있으면 조준 방향)"],
-	["1-4", "장비 액티브 스킬 (스킬 있는 장비만 빈칸 없이 배치)"],
-	["E", "상자 열기 · 장비 상자 · 제작대 · 순간이동 탑"],
+	["1-4", "무기 외 장비 액티브 스킬 (스킬 있는 장비만 빈칸 없이 배치)"],
+	["E", "상자 열기 · 장비 상자 · 제작대 · 순간이동 탑 · 왕국 핵 (제작대·방어 강화, 영토 확장, 수리)"],
 	["B", "건설 메뉴 (벽·공성탑·생활 탭, 좌클릭 설치 · 우클릭 철거 · Esc 종료)"],
 	["R", "왕국 핵 근처에서 수리"],
 	["I", "장비창"],
-	["K", "패시브 (경험치로 배우기)"],
+	["K", "패시브 (레벨업 포인트로 배우기)"],
 	["T", "전략회의 (게임 일시정지, 지도에 핑)"],
 	["M", "전체 지도"],
 	["N", "바로 밤으로 넘기기 (테스트용)"],
@@ -31,9 +31,11 @@ var _multi_seed: LineEdit
 var _multi_start: Button
 var _menu := Control.new()
 var _background := TextureRect.new()
+var _settings_panel := SettingsPanel.new()
 
 
 func _ready() -> void:
+	CursorArt.attach(self, false)
 	if Session.autostart_seed != "":
 		var seed_text := Session.autostart_seed
 		Session.autostart_seed = ""
@@ -67,6 +69,25 @@ func _ready() -> void:
 	_build_multi_popup()
 	_skin_popup(_single_popup)
 	_skin_popup(_multi_popup)
+	# 오른쪽 위 설정 버튼 (D-030). 창은 게임 중 Esc 메뉴와 같은 것을 쓴다
+	var settings_button := UiKit.button("설정", _settings_panel.open)
+	settings_button.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	settings_button.custom_minimum_size = Vector2(96, 40)
+	settings_button.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	settings_button.position = Vector2(-120, 20)
+	settings_button.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	settings_button.custom_minimum_size = Vector2(112, 44)
+	settings_button.position = Vector2(-136, 20)
+	var gear := TextureRect.new()
+	gear.texture = SettingsPanel.icon("gear")
+	gear.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	gear.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	gear.position = Vector2(10, 10)
+	gear.size = Vector2(24, 24)
+	settings_button.add_child(gear)
+	add_child(settings_button)
+	add_child(_settings_panel)
+	_settings_panel.setup(Session.settings)
 	for popup in [_single_popup, _multi_popup]:
 		popup.visibility_changed.connect(_update_menu_focus)
 		_sound_effects.watch_panel(popup)
@@ -86,6 +107,7 @@ func _start_music() -> void:
 	_menu_music.name = "MenuMusic"
 	_menu_music.stream = stream
 	_menu_music.volume_db = -60.0
+	_menu_music.bus = GameSettings.MUSIC_BUS
 	add_child(_menu_music)
 	_menu_music.play()
 	create_tween().tween_property(_menu_music, "volume_db", SoundDB.TITLE_MUSIC_VOLUME_DB, SoundDB.TITLE_MUSIC_FADE_SECONDS)

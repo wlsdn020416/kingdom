@@ -259,6 +259,9 @@ func _refresh() -> void:
 		_bag.add_child(empty)
 	_bag_count.text = "장비 %d개  ·  클릭해서 착용" % _equipment.bag.size()
 	var skills := PackedStringArray()
+	var weapon_skill := _equipment.weapon_skill_item()
+	if weapon_skill != "":
+		skills.append("우클릭  %s" % ItemDB.ITEMS[weapon_skill]["skill"]["name"])
 	var bar := _equipment.skill_bar()
 	for i in bar.size():
 		skills.append("%d  %s" % [i + 1, ItemDB.ITEMS[bar[i]]["skill"]["name"]])
@@ -429,7 +432,7 @@ func _set_cell_name(button: Button, text: String, id := "") -> void:
 	label.text = text
 	label.add_theme_font_size_override("font_size", 10 if button.custom_minimum_size.x <= SLOT_SIZE else 11)
 	var icon := button.get_node_or_null("WeaponIcon") as TextureRect
-	if not ItemArtDB.ORDER.has(id):
+	if ItemArtDB.icon(id) == null:
 		if icon != null:
 			icon.hide()
 		label.position.y = 18

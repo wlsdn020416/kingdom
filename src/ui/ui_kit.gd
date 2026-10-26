@@ -61,6 +61,7 @@ static func note(text: String) -> Label:
 
 static func button(text: String, on_pressed: Callable) -> Button:
 	var b := Button.new()
+	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	b.text = text
 	b.focus_mode = Control.FOCUS_NONE
 	b.alignment = HORIZONTAL_ALIGNMENT_LEFT

@@ -148,7 +148,7 @@ func _locked_reason(id: String) -> String:
 func _refresh() -> void:
 	if not visible:
 		return
-	_technology.text = "제작대 %d단계  ·  전체 %d종" % [_kingdom.workbench_tier(), BuildingDB.ORDER.size()]
+	_technology.text = "방어 %d단계  ·  전체 %d종" % [_kingdom.defense_tier, BuildingDB.ORDER.size()]
 	var perks := _player.progression.build_perks()
 	for i in _tabs.get_child_count():
 		(_tabs.get_child(i) as Button).add_theme_color_override("font_color", MenuArt.GOLD if BuildingDB.CATEGORIES[i] == _category else MenuArt.MUTED)
@@ -166,7 +166,7 @@ func _refresh() -> void:
 		card.queue_redraw()
 	var info: Dictionary = BuildingDB.TYPES[_selected]
 	_name.text = info["name"]
-	_category_label.text = "%s  /  제작대 %d단계" % [BuildingDB.CATEGORY_NAMES[info["category"]], info["tier"]]
+	_category_label.text = "%s  /  방어 %d단계" % [BuildingDB.CATEGORY_NAMES[info["category"]], info["tier"]]
 	_preview.type_id = _selected
 	_description.text = info["description"]
 	var stats := "체력 %d  ·  %s" % [roundi(info["hp"] * perks["hp_scale"]), "왕국 밖 설치 가능" if info.get("outside", false) else "왕국 영토 안에 설치"]

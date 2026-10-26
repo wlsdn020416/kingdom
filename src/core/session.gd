@@ -14,6 +14,8 @@ var autostart_seed := ""
 ## 게임을 켜 있는 동안 계속 살아 있어야 해서 오토로드인 Session 아래에 둔다 (새 오토로드를 만들지 않음, D-016)
 var steam := SteamService.new()
 var net := NetSession.new()
+## 환경 설정 (D-030). 판 사이에도 남는 기기별 값이라 판 상태 규칙의 예외다
+var settings := GameSettings.new()
 
 
 func _ready() -> void:
@@ -21,6 +23,9 @@ func _ready() -> void:
 	add_child(steam)
 	add_child(net)
 	net.setup(steam)
+	settings.load_file()
+	settings.apply(get_tree().root)
+	settings.changed.connect(func() -> void: settings.apply(get_tree().root))
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--seed="):
 			autostart_seed = arg.trim_prefix("--seed=")
@@ -36,6 +41,13 @@ func back_to_title() -> void:
 	net.leave()
 	get_tree().paused = false
 	get_tree().change_scene_to_file(TITLE_SCENE)
+
+
+## 게임을 끈다 (Esc 메뉴, D-030). 멀티플레이 연결을 먼저 정리하고 설정을 저장한다
+func quit_game() -> void:
+	net.leave()
+	settings.save_file()
+	get_tree().quit()
 
 
 func random_seed() -> String:

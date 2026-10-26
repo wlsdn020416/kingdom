@@ -50,7 +50,7 @@ func refresh(selected: String, branch: String) -> void:
 		var missing := PassiveDB.missing_requirements(id, _progression.ranks)
 		var maximum := PassiveDB.max_rank(id)
 		var cost := _progression.next_cost(id)
-		var available := missing.is_empty() and cost >= 0 and _progression.xp >= cost
+		var available := missing.is_empty() and cost >= 0 and _progression.points >= cost
 		button.state = PassiveNode.State.COMPLETE if rank >= maximum else PassiveNode.State.LEARNED if rank > 0 else PassiveNode.State.AVAILABLE if available else PassiveNode.State.LOCKED
 		button.selected = id == selected
 		button.rank_text = "%d/%d" % [rank, maximum]

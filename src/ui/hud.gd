@@ -6,7 +6,9 @@ const HINT := "B 건설 · I 장비 · K 패시브 · E 상자·장비 상자·�
 const MESSAGE_LIMIT := 4
 const MESSAGE_TIME := 4.0
 const MARGIN := 16.0
-const MINIMAP_SIZE := 180.0
+const MINIMAP_SIZE := 192.0
+const MINIMAP_HEIGHT := 224.0
+const BAG_GAP := 10.0
 const STATUS_WIDTH := 276.0
 const RESOURCE_COLUMNS := 3
 const RESOURCE_ICON_SIZE := 24
@@ -47,16 +49,74 @@ class ClockFace extends Control:
 		draw_circle(center, 3, color)
 
 
+## 재료 칸 점유율을 읽기만 한다. 소량의 서로 다른 재료도 각자 한 칸을 쓰는 실제 가방 규칙과 같다.
+class BagGauge extends Control:
+	signal activated
+	const WIDTH := 96.0
+	const HEIGHT := 84.0
+	const WARNING_RATIO := 0.8
+	var used := 0
+	var capacity := 1
+	var ratio := 0.0
+	var _inventory: Inventory
+
+
+	func setup(inventory: Inventory) -> void:
+		_inventory = inventory
+		theme = MenuArt.theme()
+		texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		mouse_filter = Control.MOUSE_FILTER_STOP
+		mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		_refresh()
+
+
+	func _process(_delta: float) -> void:
+		if used != _inventory.used_slots() or capacity != _inventory.capacity():
+			_refresh()
+
+
+	func _refresh() -> void:
+		used = _inventory.used_slots()
+		capacity = _inventory.capacity()
+		ratio = clampf(float(used) / maxi(1, capacity), 0.0, 1.0)
+		tooltip_text = "재료 가방 %d / %d칸 · %d칸 남음\n같은 재료 %d개가 한 칸을 씁니다.\n성 근처에서 공용 창고로 자동 입고됩니다.\n클릭: 가방·창고 재료 보기" % [used, capacity, maxi(0, capacity - used), Balance.STACK_SIZE]
+		queue_redraw()
+
+
+	func _draw() -> void:
+		var state := 2 if used >= capacity else 1 if ratio >= WARNING_RATIO else 0
+		var accent := Color("db7559") if state == 2 else MenuArt.GOLD if state == 1 else Color("94b99a")
+		draw_style_box(UiKit.box_style(Color(0.04, 0.065, 0.085, 0.94), 5), Rect2(Vector2.ZERO, size))
+		var font := get_theme_default_font()
+		draw_string(font, Vector2(18, 15), "재료 가방", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, MenuArt.GOLD)
+		draw_texture_rect_region(MapView.ART, Rect2(0, 16, 48, 64), Rect2(96 + state * 48, 0, 48, 64))
+		draw_rect(Rect2(14, 58, floorf(20.0 * ratio), 5), accent)
+		for i in 4:
+			draw_line(Vector2(18 + i * 4, 58), Vector2(18 + i * 4, 63), Color("101c27"), 1)
+		draw_string(font, Vector2(44, 43), "%d/%d칸" % [used, capacity], HORIZONTAL_ALIGNMENT_CENTER, 50, 12, MenuArt.TEXT)
+		draw_string(font, Vector2(44, 61), "가득 참" if state == 2 else "%d%%" % roundi(ratio * 100.0), HORIZONTAL_ALIGNMENT_CENTER, 50, 11, accent)
+
+
+	func _gui_input(event: InputEvent) -> void:
+		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+			activated.emit()
+			accept_event()
+
+
 var equipment_panel: EquipmentPanel
 var storage_panel: StoragePanel
 var build_menu: BuildMenu
 var crafting_panel: CraftingPanel
 var teleport_panel: TeleportPanel
+var kingdom_panel: KingdomPanel
+var pause_menu: PauseMenu
 var threat_banner := ThreatBanner.new()
 var passive_panel: PassivePanel
 var meeting_panel: MeetingPanel
 var game_over_panel: GameOverPanel
 
+var _bag_gauge: BagGauge
+var _minimap: MapView
 var _main: Main
 var _day_label: Label
 var _core_bar: ProgressBar
@@ -66,11 +126,13 @@ var _clock_face: ClockFace
 var _phase_label: Label
 var _resource_toggle: Button
 var _resource_drawer: VBoxContainer
+var _resource_scroll: ScrollContainer
 var _bag_label: Label
 var _resource_counts: Dictionary = {}
 var _messages: VBoxContainer
-var _big_map: MapView
+var _big_map: WorldMapPanel
 var _action_bar: ActionBar
+var _progression_hud: ProgressionHud
 
 
 func setup(main: Main) -> void:
@@ -80,10 +142,9 @@ func setup(main: Main) -> void:
 	_build_messages()
 	_build_action_bar()
 	_build_hint()
-	_big_map = MapView.new().setup(main.map_state)
-	_big_map.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT, Control.PRESET_MODE_MINSIZE, 60)
-	_big_map.hide()
+	_big_map = WorldMapPanel.new()
 	add_child(_big_map)
+	_big_map.setup(main.map_state, main.day_night)
 	equipment_panel = EquipmentPanel.new()
 	add_child(equipment_panel)
 	equipment_panel.setup(main.player.equipment, main.player.inventory)
@@ -101,9 +162,16 @@ func setup(main: Main) -> void:
 	teleport_panel = TeleportPanel.new()
 	add_child(teleport_panel)
 	teleport_panel.setup(main.kingdom, main.world, main.player, main.map_state)
+	kingdom_panel = KingdomPanel.new()
+	add_child(kingdom_panel)
+	kingdom_panel.setup(main.kingdom, main.player, main.kingdom_sync)
+	pause_menu = PauseMenu.new()
+	add_child(pause_menu)
+	pause_menu.setup(Session.settings)
 	passive_panel = PassivePanel.new()
 	add_child(passive_panel)
 	passive_panel.setup(main.player.progression)
+	_progression_hud.passive_requested.connect(passive_panel.toggle)
 	meeting_panel = MeetingPanel.new()
 	add_child(meeting_panel)
 	meeting_panel.setup(main.map_state, main.map_sync, main.meeting_sync)
@@ -116,8 +184,15 @@ func toggle_big_map() -> void:
 	_big_map.visible = not _big_map.visible
 
 
-func close_big_map() -> void:
+func is_big_map_open() -> bool:
+	return _big_map.visible
+
+
+## 닫았으면 true (열려 있었음)
+func close_big_map() -> bool:
+	var was_open := _big_map.visible
 	_big_map.hide()
+	return was_open
 
 
 func show_message(text: String) -> void:
@@ -162,11 +237,18 @@ func _process(_delta: float) -> void:
 
 
 ## 재화 버튼 위에서 누른 좌클릭이 폴링 기반 기본 공격으로도 처리되지 않게 한다.
-func is_pointer_over_status() -> bool:
-	return _status_panel.get_global_rect().has_point(_status_panel.get_global_mouse_position()) or _action_bar.is_pointer_over_bar()
+func is_pointer_over_status(at: Vector2 = Vector2.INF) -> bool:
+	var pointer := _status_panel.get_global_mouse_position() if at == Vector2.INF else at
+	return _status_panel.get_global_rect().has_point(pointer) or _bag_gauge.get_global_rect().has_point(pointer) or _action_bar.is_pointer_over_bar(_action_bar.get_global_transform().affine_inverse() * pointer)
 
 
 func _refresh_resources() -> void:
+	var room := maxf(80.0, get_viewport().get_visible_rect().size.y - _resource_scroll.global_position.y - 48.0)
+	var drawer_height := minf(_resource_drawer.get_combined_minimum_size().y, room)
+	if not is_equal_approx(_resource_scroll.custom_minimum_size.y, drawer_height):
+		_resource_scroll.custom_minimum_size.y = drawer_height
+		_resource_scroll.reset_size()
+		_status_panel.reset_size()
 	var bag := _main.player.inventory
 	_bag_label.text = "내 가방  %d / %d칸" % [bag.used_slots(), bag.capacity()]
 	var sources: Dictionary = {"bag": bag.amounts(), "stock": _main.kingdom.stock}
@@ -182,6 +264,7 @@ func _refresh_resources() -> void:
 func _toggle_resources(open: bool) -> void:
 	Events.ui_sound_requested.emit("click")
 	_resource_drawer.visible = open
+	_resource_scroll.visible = open
 	_resource_toggle.text = "재화  ▴" if open else "재화  ▾"
 	_resource_toggle.tooltip_text = "재화 접기" if open else "가방·창고 재화 펼치기"
 	if open:
@@ -215,6 +298,7 @@ func _build_status_panel() -> void:
 	box.add_child(_core_bar)
 	_hp_bar = _make_bar(HealthBarArt.Tone.RED)
 	box.add_child(_hp_bar)
+	_build_progression_hud(box)
 	_resource_toggle = Button.new()
 	_resource_toggle.focus_mode = Control.FOCUS_NONE
 	_resource_toggle.toggle_mode = true
@@ -226,7 +310,11 @@ func _build_status_panel() -> void:
 	box.add_child(_resource_toggle)
 	_resource_drawer = VBoxContainer.new()
 	_resource_drawer.add_theme_constant_override("separation", 8)
-	box.add_child(_resource_drawer)
+	_resource_scroll = ScrollContainer.new()
+	_resource_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	box.add_child(_resource_scroll)
+	_resource_drawer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_resource_scroll.add_child(_resource_drawer)
 	_bag_label = UiKit.heading("내 가방", 13)
 	_resource_drawer.add_child(_bag_label)
 	_build_resource_grid("bag")
@@ -267,13 +355,25 @@ func _build_resource_grid(source: String) -> void:
 
 func _build_minimap() -> void:
 	var minimap := MapView.new().setup(_main.map_state)
+	_minimap = minimap
+	minimap.mini = true
 	minimap.anchor_left = 1.0
 	minimap.anchor_right = 1.0
 	minimap.offset_left = -MARGIN - MINIMAP_SIZE
 	minimap.offset_right = -MARGIN
 	minimap.offset_top = MARGIN
-	minimap.offset_bottom = MARGIN + MINIMAP_SIZE
+	minimap.offset_bottom = MARGIN + MINIMAP_HEIGHT
 	add_child(minimap)
+	_bag_gauge = BagGauge.new()
+	_bag_gauge.setup(_main.player.inventory)
+	_bag_gauge.anchor_left = 1.0
+	_bag_gauge.anchor_right = 1.0
+	_bag_gauge.offset_left = -MARGIN - MINIMAP_SIZE - BAG_GAP - BagGauge.WIDTH
+	_bag_gauge.offset_right = -MARGIN - MINIMAP_SIZE - BAG_GAP
+	_bag_gauge.offset_top = MARGIN + 20
+	_bag_gauge.offset_bottom = MARGIN + 20 + BagGauge.HEIGHT
+	_bag_gauge.activated.connect(func() -> void: _resource_toggle.button_pressed = not _resource_toggle.button_pressed)
+	add_child(_bag_gauge)
 
 
 func _build_messages() -> void:
@@ -301,6 +401,12 @@ func _build_action_bar() -> void:
 	bar.offset_top = -40 - ActionBar.DOCK_HEIGHT
 	bar.offset_bottom = -40
 	add_child(bar)
+
+
+func _build_progression_hud(box: VBoxContainer) -> void:
+	_progression_hud = ProgressionHud.new()
+	box.add_child(_progression_hud)
+	_progression_hud.setup(_main.player.progression)
 
 
 func _build_hint() -> void:

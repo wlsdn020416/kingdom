@@ -60,9 +60,9 @@ func _build_header() -> void:
 	var subtitle := _label("왕국을 지키는 나만의 성장 경로", 13, MenuArt.MUTED)
 	subtitle.position = Vector2(136, 28)
 	_canvas.add_child(subtitle)
-	_xp_label = _label("", 22, MenuArt.GOLD)
-	_xp_label.position = Vector2(850, 20)
-	_xp_label.size.x = 242
+	_xp_label = _label("", 20, MenuArt.GOLD)
+	_xp_label.position = Vector2(640, 22)
+	_xp_label.size.x = 452
 	_xp_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_canvas.add_child(_xp_label)
 	var close := UiKit.button("닫기", hide)
@@ -166,7 +166,7 @@ func _learn(id: String) -> void:
 func _refresh() -> void:
 	if not visible:
 		return
-	_xp_label.text = "경험치  %d" % _progression.xp
+	_xp_label.text = "Lv %d   ·   포인트 %d   ·   경험치 %d / %d" % [_progression.level, _progression.points, _progression.xp, _progression.xp_to_next()]
 	for branch: String in _tabs:
 		var button: Button = _tabs[branch]
 		button.add_theme_color_override("font_color", MenuArt.GOLD if branch == _branch else MenuArt.MUTED)
@@ -189,10 +189,10 @@ func _refresh() -> void:
 	for required: String in info["requires"]:
 		names.append(("✓ " if _progression.rank(required) > 0 else "· ") + PassiveDB.PASSIVES[required]["name"])
 	_requires_label.text = "중앙에서 바로 시작할 수 있습니다." if names.is_empty() else "선행 노드\n" + "\n".join(names)
-	_cost_label.text = "최고 단계 달성" if cost < 0 else "필요 경험치  %d" % cost
-	var can_learn := cost >= 0 and missing.is_empty() and _progression.xp >= cost
+	_cost_label.text = "최고 단계 달성" if cost < 0 else "필요 포인트  %d" % cost
+	var can_learn := cost >= 0 and missing.is_empty() and _progression.points >= cost
 	_learn_button.disabled = not can_learn
-	_learn_button.text = "최고 단계" if cost < 0 else "선행 노드 필요" if not missing.is_empty() else "경험치 부족" if _progression.xp < cost else "배우기"
+	_learn_button.text = "최고 단계" if cost < 0 else "선행 노드 필요" if not missing.is_empty() else "포인트 부족" if _progression.points < cost else "배우기"
 	_cost_label.add_theme_color_override("font_color", MenuArt.GOLD if can_learn or cost < 0 else MenuArt.MUTED)
 
 

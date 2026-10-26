@@ -88,6 +88,7 @@ func _world_voice() -> AudioStreamPlayer2D:
 	voice.max_distance = AUDIBLE_DISTANCE
 	voice.attenuation = DISTANCE_ATTENUATION
 	voice.panning_strength = PANNING_STRENGTH
+	voice.bus = GameSettings.SFX_BUS
 	add_child(voice)
 	_world_voices.append(voice)
 	return voice
@@ -103,6 +104,7 @@ func _ui_voice() -> AudioStreamPlayer:
 		_ui_voices.append(oldest)
 		return oldest
 	var voice := AudioStreamPlayer.new()
+	voice.bus = GameSettings.SFX_BUS
 	add_child(voice)
 	_ui_voices.append(voice)
 	return voice

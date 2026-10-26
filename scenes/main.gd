@@ -7,6 +7,8 @@ const SHAKE_RANGE := 640.0  # 이 거리 밖의 폭발·돌진은 화면을 흔�
 const HITSTOP_SCALE := 0.05  # 멈칫: 게임 속도를 잠깐 이만큼 늦춘다. 혼자 플레이에서만
 const HITSTOP_EMPHASIS := 0.05  # 강조 공격 멈칫 시간(초, 실제 시간)
 const HITSTOP_BOSS := 0.15  # 보스 처치 멈칫
+const REGROW_PLAYER_GAP := 3.0 * Balance.TILE  # 아침 재생이 플레이어 이 거리 안에는 자라지 않는다 (D-035)
+const HIT_FEEL_INTERVAL_MS := 60  # 한 번에 여러 적을 맞혀도(산탄·범위) 타격감은 이 간격에 한 번 (D-029)
 
 @onready var world: World = $World
 @onready var kingdom: Kingdom = $Kingdom
@@ -31,10 +33,12 @@ var map_sync := MapSync.new()
 ## 전략회의 열기·준비 완료는 이걸 거친다 (누가 열든 모두 멈춘다, D-019)
 var meeting_sync := MeetingSync.new()
 var sound_effects := SoundEffects.new()
+var boss_music := MusicPlayer.new()
 var _steps := {}
 
 
 func _ready() -> void:
+	CursorArt.attach(self, true)
 	world.setup(WorldGenerator.generate(Session.seed_text), rng)
 	kingdom.setup(world)
 	map_state = MapState.new(world, kingdom)
@@ -50,6 +54,10 @@ func _ready() -> void:
 	Events.combat_effect_requested.connect(func(id: String, at: Vector2, size: float, angle: float) -> void: CombatEffect.spawn(get_tree(), id, at, size, angle))
 	Events.damage_dealt.connect(show_damage)
 	Events.screen_shake_requested.connect(shake_screen)
+	_base_zoom = player.camera.zoom
+	add_child(_prompt)
+	Session.settings.changed.connect(_apply_settings)
+	_apply_settings()
 	player_sync.name = "PlayerSync"
 	player_sync.setup(Session.net, player, self)
 	add_child(player_sync)
@@ -122,11 +130,26 @@ func boss_status() -> Dictionary:
 	return {}
 
 
-## 피해 숫자 (D-023). 참가자 화면에는 CombatSync가 호스트의 숫자를 모아서 보낸다
-func show_damage(at: Vector2, amount: float, emphasis: bool) -> void:
-	Fx.damage_number(get_tree(), at, amount, emphasis)
-	if emphasis:
-		_hitstop(HITSTOP_EMPHASIS)
+## 환경 설정(D-030) 중 게임 화면이 읽는 값. UI 크기는 창 전체 배율을 바꾸므로 카메라 줌을 그만큼 되돌려 월드 크기는 그대로 둔다
+func _apply_settings() -> void:
+	var settings := Session.settings
+	player.shake_scale = settings.get_value("shake")
+	player.camera.zoom = _base_zoom / float(settings.get_value("ui_scale"))
+
+
+## 피해 숫자 (D-023). 참가자 화면에는 CombatSync가 호스트의 숫자를 모아서 보낸다.
+## source가 나(peer id)면 지금 든 무기의 타격감을 낸다 (D-029). 탑(-1)·다른 사람이 때린 것은 숫자만
+func show_damage(at: Vector2, amount: float, emphasis: bool, source := 0) -> void:
+	if Session.settings.get_value("damage_numbers"):
+		Fx.damage_number(get_tree(), at, amount, emphasis)
+	var hitstop := HITSTOP_EMPHASIS if emphasis else 0.0
+	if source == multiplayer.get_unique_id() and Time.get_ticks_msec() - _last_hit_feel >= HIT_FEEL_INTERVAL_MS:
+		_last_hit_feel = Time.get_ticks_msec()
+		var feel := WeaponArtDB.feel(player.equipment.item_in("weapon"))
+		player.add_shake(feel["shake"])
+		hitstop = maxf(hitstop, feel["hitstop"])
+	if hitstop > 0.0:
+		_hitstop(hitstop)
 
 
 ## 내 캐릭터와 가까울수록 세게 흔든다. 무한 좌표(보스 등장·처치)는 거리와 무관
@@ -141,11 +164,16 @@ func shake_screen(at: Vector2, strength: float) -> void:
 
 
 var _hitstopping := false
+## 테스트용: 마우스 대신 이 월드 좌표를 쓴다 (INF면 실제 마우스)
+var mouse_override := Vector2.INF
+var _prompt := InteractPrompt.new()
+var _base_zoom := Vector2.ONE
+var _last_hit_feel := 0
 
 
 ## 멈칫: 게임 속도를 실제 시간 duration초 동안 늦춘다. 멀티플레이에서는 호스트 속도가 모두의 게임을 바꾸므로 하지 않는다
 func _hitstop(duration: float) -> void:
-	if Session.net.is_online() or _hitstopping or get_tree().paused:
+	if Session.net.is_online() or _hitstopping or get_tree().paused or not Session.settings.get_value("hitstop"):
 		return
 	_hitstopping = true
 	var before := Engine.time_scale
@@ -161,10 +189,13 @@ func show_deposit(moved: Dictionary) -> void:
 
 
 func _process(_delta: float) -> void:
+	boss_music.set_active(not boss_status().is_empty())
 	player.attack_enabled = not (build_mode.active or hud.build_menu.visible or hud.equipment_panel.visible
 		or hud.storage_panel.visible or hud.crafting_panel.visible or hud.passive_panel.visible or hud.teleport_panel.visible
-		or hud.is_pointer_over_status())
+		or hud.kingdom_panel.visible or hud.pause_menu.visible or hud.is_big_map_open() or hud.is_pointer_over_status())
 	player.skills_enabled = not build_mode.active
+	# 창이 열려 있거나 설치 중이면 E 안내를 숨긴다 (기본 공격이 막힌 상태와 같다)
+	_prompt.show_target(interact_target(mouse_world()) if player.attack_enabled and not player.is_dead else {})
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -188,7 +219,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		else:
 			combat_sync.request_skip_night()
 	elif event.is_action_pressed("ui_cancel"):
-		_close_overlays()
+		# 열린 창이 있으면 닫기만 하고, 아무것도 없을 때 Esc 메뉴를 연다 (D-030)
+		if hud.pause_menu.visible:
+			hud.pause_menu.close()
+		elif not _close_overlays():
+			hud.pause_menu.show()
 	else:
 		return
 	get_viewport().set_input_as_handled()
@@ -200,15 +235,16 @@ func open_meeting(opener: String, total: int) -> void:
 	hud.meeting_panel.open(opener, total)
 
 
-func _close_overlays() -> void:
+## 열린 창·설치 모드를 모두 닫는다. 하나라도 열려 있었으면 true (Esc가 메뉴를 열지 판단한다)
+func _close_overlays() -> bool:
+	var panels: Array[Control] = [hud.build_menu, hud.equipment_panel, hud.storage_panel, hud.crafting_panel,
+		hud.teleport_panel, hud.kingdom_panel, hud.passive_panel, hud.pause_menu]
+	var was_open := build_mode.active
+	for panel in panels:
+		was_open = was_open or panel.visible
+		panel.hide()
 	build_mode.set_active(false)
-	hud.build_menu.hide()
-	hud.equipment_panel.hide()
-	hud.storage_panel.hide()
-	hud.crafting_panel.hide()
-	hud.teleport_panel.hide()
-	hud.passive_panel.hide()
-	hud.close_big_map()
+	return hud.close_big_map() or was_open
 
 
 ## B: 건설 메뉴를 열고 닫는다. 설치 중에 누르면 설치를 멈추고 메뉴로 돌아간다
@@ -220,34 +256,72 @@ func _toggle_build_menu() -> void:
 	hud.build_menu.open()
 
 
-## E: 장비 상자·제작대 창을 열고 닫거나, 월드의 보물 상자를 연다
+## E: 장비 상자·제작대·순간이동 탑·왕국 핵 창을 열고 닫거나, 월드의 보물 상자를 연다
 func _interact() -> void:
-	if hud.storage_panel.visible or hud.crafting_panel.visible or hud.teleport_panel.visible:
+	if hud.storage_panel.visible or hud.crafting_panel.visible or hud.teleport_panel.visible or hud.kingdom_panel.visible:
 		hud.storage_panel.hide()
 		hud.crafting_panel.hide()
 		hud.teleport_panel.hide()
+		hud.kingdom_panel.hide()
 		return
 	if player.is_dead:
 		return
-	var storage := kingdom.find_storage_near(player.global_position)
-	if storage != World.NO_CELL:
-		hud.storage_panel.open(storage)
-		return
-	var workbench := kingdom.find_workbench_near(player.global_position)
-	if workbench != World.NO_CELL:
-		hud.crafting_panel.open(workbench)
-		return
-	var teleport := kingdom.find_teleport_near(player.global_position)
-	if teleport != World.NO_CELL:
-		hud.teleport_panel.open(teleport)
-		return
-	var chest := world.find_chest_near(player.global_position)
-	if chest == World.NO_CELL:
-		return
-	if Session.net.is_host():
-		world.open_chest(chest, Enemy.SOURCE_LOCAL)
-	else:
-		world_sync.request_open_chest(chest)
+	var target := interact_target(mouse_world())
+	match target.get("kind", ""):
+		"storage":
+			hud.storage_panel.open(target["cell"])
+		"workbench":
+			hud.crafting_panel.open(target["cell"])
+		"teleport":
+			hud.teleport_panel.open(target["cell"])
+		"core":
+			hud.kingdom_panel.open()
+		"chest":
+			if Session.net.is_host():
+				world.open_chest(target["cell"], Enemy.SOURCE_LOCAL)
+			else:
+				world_sync.request_open_chest(target["cell"])
+
+
+## E로 열 대상 (D-031). 주변에 하나면 그것, 여럿이면 mouse(월드 좌표)에 가장 가까운 것. 없으면 {}
+func interact_target(mouse: Vector2) -> Dictionary:
+	var options := interactables()
+	if options.size() <= 1:
+		return options[0] if not options.is_empty() else {}
+	var best: Dictionary = options[0]
+	for option: Dictionary in options:
+		if mouse.distance_to(option["at"]) < mouse.distance_to(best["at"]):
+			best = option
+	return best
+
+
+## 지금 내 캐릭터가 E로 열 수 있는 것 모두: {"kind", "cell", "at", "name", "size"}.
+## 건물은 Balance.USE_REACH, 왕국 핵은 CORE_USE_RANGE, 보물 상자는 둘레 한 칸 안
+func interactables() -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	var at := player.global_position
+	for cell: Vector2i in kingdom.buildings:
+		var building: Building = kingdom.buildings[cell]
+		if building.global_position.distance_to(at) > Balance.USE_REACH:
+			continue
+		var kind := "storage" if building.storage_capacity() > 0 else "workbench" if building.is_workbench() \
+			else "teleport" if building.info.get("teleport", false) else ""
+		if kind != "":
+			result.append({"kind": kind, "cell": cell, "at": building.global_position, "name": building.info["name"], "size": Balance.TILE})
+	if kingdom.core_use_error(at) == "":
+		result.append({"kind": "core", "cell": kingdom.core_cell(), "at": kingdom.core.global_position, "name": "왕국 집무실", "size": Balance.TILE * 3})
+	var center := world.cell_at(at)
+	for y in range(-1, 2):
+		for x in range(-1, 2):
+			var cell := center + Vector2i(x, y)
+			if world.data.get_object(cell) == WorldData.Obj.CHEST:
+				result.append({"kind": "chest", "cell": cell, "at": world.cell_center(cell), "name": "보물 상자", "size": Balance.TILE})
+	return result
+
+
+## 마우스가 가리키는 월드 위치. 테스트는 mouse_override로 정한다
+func mouse_world() -> Vector2:
+	return mouse_override if mouse_override.is_finite() else get_global_mouse_position()
 
 
 ## 멀티플레이에서는 보상을 받은 플레이어를 신호에 실어야 한다. 지금은 1인이라 로컬 플레이어.
@@ -327,20 +401,22 @@ func grant_reward(xp: int, resources: Dictionary, at: Vector2) -> void:
 
 
 func _on_object_harvested(object_id: int, cell: Vector2i, drops: Dictionary, harvester: int) -> void:
+	var xp := Balance.roll_harvest_xp(world.data.tier_at(cell), rng)
 	if harvester == Enemy.SOURCE_LOCAL:
-		grant_harvest(object_id, cell, drops)
+		grant_harvest(object_id, cell, drops, xp)
 	else:
 		_learn(drops)
-		world_sync.send_harvest(harvester, object_id, cell, drops)
+		world_sync.send_harvest(harvester, object_id, cell, drops, xp)
 
 
 ## 채집 재료·경험치를 내 캐릭터에 준다 (호스트가 보낸 보상도 여기로 온다).
+## xp = 호스트가 굴린 기본 채집 경험치(안 나왔으면 0). 채집 학자 보너스와
 ## 풍요로운 손 보너스는 받는 사람의 패시브로 정한다 (호스트는 다른 사람의 패시브를 모른다, 임시)
-func grant_harvest(object_id: int, cell: Vector2i, drops: Dictionary) -> void:
+func grant_harvest(object_id: int, cell: Vector2i, drops: Dictionary, xp: int) -> void:
 	var at := world.cell_center(cell)
 	Events.resources_gained.emit(drops, at)
-	var xp: int = Balance.XP_HARVEST_BY_TIER[world.data.tier_at(cell)]
-	_give_xp(player, roundi(xp * (1.0 + player.progression.value("harvest_scholar") / 100.0)), at)
+	if xp > 0:
+		_give_xp(player, roundi(xp * (1.0 + player.progression.value("harvest_scholar") / 100.0)), at)
 	var herb := player.progression.value("herbalist")
 	if herb > 0.0 and not player.is_dead:
 		player.heal(herb)
@@ -377,6 +453,28 @@ func _on_day_started(_day: int) -> void:
 	if blessing > 0.0 and not player.is_dead:
 		player.heal(player.max_hp() * blessing / 100.0)
 		player.show_passive("dawn_blessing")
+	if Session.net.is_host():
+		regrow_resources()
+
+
+## 아침 재생 (D-035): 나무·바위·광석을 처음 총량까지 다시 자라게 하고 참가자에게 알린다. 월드 상태라 호스트만 한다
+func regrow_resources() -> int:
+	var grown := world.regrow(rng, _regrowth_blocked)
+	world_sync.send_regrowth(grown)
+	if not grown.is_empty():
+		Events.message.emit("밤사이 나무와 광맥이 다시 자랐습니다 (%d곳)" % grown.size())
+	return grown.size()
+
+
+## 왕국 영토·건물 칸과 플레이어 바로 옆에는 다시 자라지 않는다 (몸에 끼거나 지을 자리를 막지 않게)
+func _regrowth_blocked(cell: Vector2i) -> bool:
+	if kingdom.in_territory(cell) or kingdom.is_occupied(cell):
+		return true
+	var at := world.cell_center(cell)
+	for someone: Node2D in get_tree().get_nodes_in_group("player"):
+		if someone.global_position.distance_to(at) < REGROW_PLAYER_GAP:
+			return true
+	return false
 
 
 ## 긴급 요새화: 왕국에 배운 사람이 한 명이라도 있으면 가장 높은 단계로 회복한다. 왕국 상태라 호스트만 한다
@@ -401,8 +499,12 @@ func _learn(amounts: Dictionary) -> void:
 func _give_xp(receiver: Player, amount: int, at: Vector2) -> void:
 	if amount <= 0 or receiver.is_dead:
 		return
-	receiver.progression.add_xp(amount)
+	var levels := receiver.progression.add_xp(amount)
 	Fx.float_text(get_tree(), at + Vector2(0, -28), "경험치 +%d" % amount, Color("b48cff"))
+	if levels > 0:
+		Fx.float_text(get_tree(), receiver.global_position + Vector2(0, -48), "레벨 업!", Color("ffd24a"))
+		Events.message.emit("레벨 %d! 패시브 포인트 +%d (K)" % [receiver.progression.level, levels])
+		Events.ui_sound_requested.emit("level_up")
 
 
 ## 멸망 판정은 호스트만 한다. 참가자에게는 CombatSync가 같은 문장을 보낸다
@@ -421,6 +523,7 @@ func _on_victory(boss_name: String) -> void:
 
 
 func show_game_over(summary: String, victory := false) -> void:
+	boss_music.set_active(false)
 	if victory:
 		Events.ui_sound_requested.emit("level_up")
 	else:
@@ -432,6 +535,9 @@ func show_game_over(summary: String, victory := false) -> void:
 
 
 func _setup_audio() -> void:
+	boss_music.name = "BossMusic"
+	add_child(boss_music)
+	boss_music.setup(SoundDB.BOSS_MUSIC, SoundDB.BOSS_MUSIC_VOLUME_DB, SoundDB.BOSS_MUSIC_FADE_SECONDS)
 	sound_effects.name = "SoundEffects"
 	add_child(sound_effects)
 	sound_effects.setup(player, SoundDB.catalog())

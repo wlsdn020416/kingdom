@@ -1,19 +1,22 @@
 class_name ActionBar
 extends Control
 ## 하단 스킬바의 픽셀 아이콘·단축키·쿨타임을 표시한다. 스킬 배치는 Equipment가 결정한다.
+## 칸 순서: 0 대시(Space), 1 무기 스킬(우클릭, D-027), 2~5 장비 스킬(1~4).
 ## 설치 모드에서는 기존 건물 비용과 조작 안내로 전환한다.
 
 enum SlotState { READY, COOLDOWN, EMPTY, PRESSED }
 
 const TEXTURE := preload("res://assets/ui/skill_ui.png")
-const ICON_ORDER := ["dash", "shotgun", "fireball", "bomb", "shield", "heal", "rally"]
+const TREE_ICONS := preload("res://assets/ui/weapon_skill_icons.png")
+const ICON_ORDER := ["dash", "shotgun", "fireball", "bomb", "shield", "heal", "rally", "slam", "dash_slash", "counter", "snipe", "arrow_rain", "blast_bolt", "frost_ring", "lightning"]
 const ICON_SIZE := 32
 const FRAME_SIZE := 40
 const SLOT_SIZE := Vector2(64, 64)
 const BUILD_SLOT_SIZE := Vector2(110, 54)
 const GAP := 6.0
 const DASH_GAP := 10.0
-const ROW_WIDTH := SLOT_SIZE.x * (Equipment.MAX_SKILLS + 1) + GAP * Equipment.MAX_SKILLS + DASH_GAP
+const FIXED_SLOTS := 2  # 구분선 왼쪽의 대시·무기 스킬 칸
+const ROW_WIDTH := SLOT_SIZE.x * (Equipment.MAX_SKILLS + FIXED_SLOTS) + GAP * (Equipment.MAX_SKILLS + FIXED_SLOTS - 1) + DASH_GAP
 const DOCK_HEIGHT := 92.0
 const DOCK_PADDING := 8.0
 const DOCK_COLOR := Color(0.04, 0.065, 0.095, 0.94)
@@ -35,18 +38,22 @@ func setup(player: Player, build_mode: BuildMode, kingdom: Kingdom) -> void:
 
 static func icon_region(skill_id: String) -> Rect2:
 	var index := ICON_ORDER.find(skill_id)
-	return Rect2(index * ICON_SIZE, 0, ICON_SIZE, ICON_SIZE) if index >= 0 else Rect2()
+	return Rect2(0, (index - 7) * ICON_SIZE, ICON_SIZE, ICON_SIZE) if index >= 7 else Rect2(index * ICON_SIZE, 0, ICON_SIZE, ICON_SIZE) if index >= 0 else Rect2()
+
+
+static func icon_texture(skill_id: String) -> Texture2D:
+	return TREE_ICONS if ICON_ORDER.find(skill_id) >= 7 else TEXTURE
 
 
 func skill_slot_rect(index: int) -> Rect2:
-	var extra := DASH_GAP if index > 0 else 0.0
+	var extra := DASH_GAP if index >= FIXED_SLOTS else 0.0
 	return Rect2(Vector2((size.x - ROW_WIDTH) * 0.5 + index * (SLOT_SIZE.x + GAP) + extra, 6), SLOT_SIZE)
 
 
-func is_pointer_over_bar() -> bool:
+func is_pointer_over_bar(at_position: Vector2 = Vector2.INF) -> bool:
 	if _build_mode.active:
 		return false
-	return Rect2(Vector2((size.x - ROW_WIDTH) * 0.5 - DOCK_PADDING, 0), Vector2(ROW_WIDTH + DOCK_PADDING * 2, DOCK_HEIGHT)).has_point(get_local_mouse_position())
+	return Rect2(Vector2((size.x - ROW_WIDTH) * 0.5 - DOCK_PADDING, 0), Vector2(ROW_WIDTH + DOCK_PADDING * 2, DOCK_HEIGHT)).has_point(get_local_mouse_position() if at_position == Vector2.INF else at_position)
 
 
 func _process(_delta: float) -> void:
@@ -67,9 +74,15 @@ func _get_tooltip(at_position: Vector2) -> String:
 		return ""
 	if skill_slot_rect(0).has_point(at_position):
 		return "대시 · Space\n조준 방향으로 빠르게 이동 · 재사용 %.1f초" % Balance.DASH_COOLDOWN
+	if skill_slot_rect(1).has_point(at_position):
+		var weapon := _player.equipment.weapon_skill_item()
+		if weapon == "":
+			return "무기 스킬 · 우클릭\n지금 무기에는 스킬이 없습니다.\n산탄 석궁·화염 지팡이처럼 스킬 있는 무기를 들면 쓸 수 있습니다."
+		var held: Dictionary = ItemDB.ITEMS[weapon]
+		return "%s · 우클릭\n%s\n%s" % [held["skill"]["name"], held["name"], ItemDB.describe(weapon)]
 	var bar := _player.equipment.skill_bar()
 	for i in Equipment.MAX_SKILLS:
-		if not skill_slot_rect(i + 1).has_point(at_position):
+		if not skill_slot_rect(i + FIXED_SLOTS).has_point(at_position):
 			continue
 		if i >= bar.size():
 			return "%d번 · 미장착\n스킬이 있는 장비를 착용하면 자동 등록됩니다.\nI 장비 · 소지품" % (i + 1)
@@ -89,8 +102,14 @@ func _draw_skill_bar() -> void:
 	var divider_x := skill_slot_rect(0).end.x + GAP + DASH_GAP * 0.5
 	draw_line(Vector2(divider_x, 18), Vector2(divider_x, 60), Color("415363"), 2)
 	_draw_skill_slot(skill_slot_rect(0), "Space", "dash", "대시", _player.dash_cooldown_left(), Balance.DASH_COOLDOWN, "dash")
+	var weapon := equipment.weapon_skill_item()
+	if weapon == "":
+		_draw_skill_slot(skill_slot_rect(1), "R클릭", "", "무기 스킬", 0.0, 1.0, "")
+	else:
+		var weapon_skill: Dictionary = ItemDB.ITEMS[weapon]["skill"]
+		_draw_skill_slot(skill_slot_rect(1), "R클릭", weapon_skill["id"], weapon_skill["name"], equipment.cooldown_left(weapon), weapon_skill["cooldown"], "weapon_skill")
 	for i in Equipment.MAX_SKILLS:
-		var rect := skill_slot_rect(i + 1)
+		var rect := skill_slot_rect(i + FIXED_SLOTS)
 		if i >= bar.size():
 			_draw_skill_slot(rect, str(i + 1), "", "미장착", 0.0, 1.0, "")
 			continue
@@ -114,7 +133,7 @@ func _draw_skill_slot(rect: Rect2, key: String, skill_id: String, skill_name: St
 	var inside := Rect2(rect.position + Vector2(6, 6), Vector2(52, 52))
 	if not skill_id.is_empty():
 		var tint := Color.WHITE if state == SlotState.READY or state == SlotState.PRESSED else Color(0.65, 0.65, 0.7)
-		draw_texture_rect_region(TEXTURE, inside, icon_region(skill_id), tint)
+		draw_texture_rect_region(icon_texture(skill_id), inside, icon_region(skill_id), tint)
 		if cooldown_left > 0.0:
 			var ratio := clampf(cooldown_left / maxf(cooldown, 0.01), 0.0, 1.0)
 			draw_rect(Rect2(inside.position, Vector2(inside.size.x, inside.size.y * ratio)), Color(0.025, 0.04, 0.07, 0.82))
@@ -123,7 +142,7 @@ func _draw_skill_slot(rect: Rect2, key: String, skill_id: String, skill_name: St
 			draw_string(font, rect.position + Vector2(0, 43), "%.1f" % cooldown_left, HORIZONTAL_ALIGNMENT_CENTER, rect.size.x, 22, TEXT)
 		elif not _player.is_dead:
 			draw_rect(Rect2(rect.position + Vector2(50, 10), Vector2(4, 4)), Skills.color(skill_id))
-	var badge_width := 42.0 if key == "Space" else 22.0
+	var badge_width := 42.0 if key.length() > 1 else 22.0
 	draw_rect(Rect2(rect.position + Vector2(4, 2), Vector2(badge_width, 18)), Color("101925"))
 	draw_string(font, rect.position + Vector2(4, 15), key, HORIZONTAL_ALIGNMENT_CENTER, badge_width, 11, MUTED if state == SlotState.EMPTY else Color("e5c888"))
 	draw_string(font, rect.position + Vector2(0, 82), skill_name, HORIZONTAL_ALIGNMENT_CENTER, SLOT_SIZE.x, 12, MUTED if state == SlotState.EMPTY else TEXT)
