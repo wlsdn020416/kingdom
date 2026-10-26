@@ -1,8 +1,8 @@
 class_name PassiveDB
 extends RefCounted
-## 경험치로 찍는 캐릭터 패시브 트리 (D-015, 트리 구조는 D-020). 수치는 임시.
+## 레벨업 포인트로 찍는 캐릭터 패시브 트리 (D-015·D-024, 트리 구조는 D-020). 수치는 임시.
 ## 갈래(branch) 3개: 전투·생존·건설. 노드마다 "requires"의 노드를 1단계 이상 배워야 찍을 수 있다.
-## "costs"[n] = n+1번째 단계를 배우는 경험치, "values"[n] = n+1단계일 때의 효과 값(누적). "desc"의 %s 자리에 효과 값이 들어간다.
+## 단계마다 패시브 포인트 1개(D-024). "values"[n] = n+1단계일 때의 효과 값(누적), 개수가 최고 단계. "desc"의 %s 자리에 효과 값이 들어간다.
 ## 노드 그래픽용 배치: "lane" = 갈래 안의 묶음 번호(LANES), "pos" = 갈래 격자 안의 (열, 행). 행 0이 뿌리. 같은 갈래 안에서 pos는 겹치지 않는다.
 
 const BRANCHES := ["combat", "survival", "building"]
@@ -34,288 +34,288 @@ const PASSIVES := {
 	"sword_mastery": {
 		"branch": "combat", "lane": 0, "pos": Vector2i(0, 0), "requires": [],
 		"name": "검술", "desc": "검 기본 공격 피해 +%s%%",
-		"costs": [8, 16, 28], "values": [10, 20, 35],
+		"values": [10, 20, 35],
 	},
 	"sword_sweep": {
 		"branch": "combat", "lane": 0, "pos": Vector2i(0, 1), "requires": ["sword_mastery"],
 		"name": "휩쓸기", "desc": "검을 휘두르는 각도 +%s도",
-		"costs": [14, 26], "values": [20, 40],
+		"values": [20, 40],
 	},
 	"bow_mastery": {
 		"branch": "combat", "lane": 0, "pos": Vector2i(1, 0), "requires": [],
 		"name": "궁술", "desc": "활 기본 공격 피해 +%s%%",
-		"costs": [8, 16, 28], "values": [10, 20, 35],
+		"values": [10, 20, 35],
 	},
 	"piercing_arrows": {
 		"branch": "combat", "lane": 0, "pos": Vector2i(1, 1), "requires": ["bow_mastery"],
 		"name": "꿰뚫는 화살", "desc": "활 기본 공격이 적을 꿰뚫고 계속 날아간다",
-		"costs": [20], "values": [1],
+		"values": [1],
 	},
 	"crossbow_mastery": {
 		"branch": "combat", "lane": 0, "pos": Vector2i(2, 0), "requires": [],
 		"name": "석궁술", "desc": "석궁 기본 공격 피해 +%s%%",
-		"costs": [8, 16, 28], "values": [10, 20, 35],
+		"values": [10, 20, 35],
 	},
 	"rapid_reload": {
 		"branch": "combat", "lane": 0, "pos": Vector2i(2, 1), "requires": ["crossbow_mastery"],
 		"name": "속사", "desc": "석궁 공격 속도 +%s%%",
-		"costs": [14, 26], "values": [15, 30],
+		"values": [15, 30],
 	},
 	"staff_mastery": {
 		"branch": "combat", "lane": 0, "pos": Vector2i(3, 0), "requires": [],
 		"name": "마력 집중", "desc": "지팡이 기본 공격 피해 +%s%%",
-		"costs": [8, 16, 28], "values": [10, 20, 35],
+		"values": [10, 20, 35],
 	},
 	"ember_burst": {
 		"branch": "combat", "lane": 0, "pos": Vector2i(3, 1), "requires": ["staff_mastery"],
 		"name": "불씨 폭발", "desc": "지팡이 기본 공격이 맞힌 자리 %s픽셀 안의 다른 적에게 절반 피해",
-		"costs": [14, 26], "values": [48, 72],
+		"values": [48, 72],
 	},
 	# --- 전투: 화력 (무기와 상관없는 순수 피해) ---
 	"keen_edge": {
 		"branch": "combat", "lane": 1, "pos": Vector2i(4, 0), "requires": [],
 		"name": "날카로운 일격", "desc": "모든 기본 공격 피해 +%s%%",
-		"costs": [10, 20, 34], "values": [10, 20, 35],
+		"values": [10, 20, 35],
 	},
 	"combo_finisher": {
 		"branch": "combat", "lane": 1, "pos": Vector2i(4, 1), "requires": ["keen_edge"],
 		"name": "마무리 일격", "desc": "기본 공격 %s번마다 한 번은 피해 2배",
-		"costs": [16, 28, 44], "values": [5, 4, 3],
+		"values": [5, 4, 3],
 	},
 	"skill_power": {
 		"branch": "combat", "lane": 1, "pos": Vector2i(5, 1), "requires": ["keen_edge"],
 		"name": "스킬 위력", "desc": "장비 스킬 피해 +%s%%",
-		"costs": [14, 28], "values": [15, 30],
+		"values": [15, 30],
 	},
 	"executioner": {
 		"branch": "combat", "lane": 1, "pos": Vector2i(4, 2), "requires": ["combo_finisher"],
 		"name": "처형자", "desc": "체력 30%% 이하인 적에게 기본 공격 피해 +%s%%",
-		"costs": [20, 36], "values": [25, 50],
+		"values": [25, 50],
 	},
 	"blade_reach": {
 		"branch": "combat", "lane": 0, "pos": Vector2i(0, 2), "requires": ["sword_mastery"],
 		"name": "긴 칼날", "desc": "검 공격 사거리 +%s%%",
-		"costs": [12, 24], "values": [15, 30],
+		"values": [15, 30],
 	},
 	"whirlwind": {
 		"branch": "combat", "lane": 0, "pos": Vector2i(0, 3), "requires": ["sword_sweep"],
 		"name": "회오리 베기", "desc": "검을 %s번 휘두를 때마다 한 번은 주위를 한 바퀴 벤다",
-		"costs": [22, 38], "values": [4, 3],
+		"values": [4, 3],
 	},
 	"multishot": {
 		"branch": "combat", "lane": 0, "pos": Vector2i(1, 2), "requires": ["bow_mastery"],
 		"name": "다중 사격", "desc": "활 기본 공격이 %s갈래로 나간다",
-		"costs": [18, 34], "values": [3, 5],
+		"values": [3, 5],
 	},
 	"twin_bolts": {
 		"branch": "combat", "lane": 0, "pos": Vector2i(2, 2), "requires": ["rapid_reload"],
 		"name": "쌍발", "desc": "석궁 기본 공격이 %s발씩 나간다",
-		"costs": [24], "values": [2],
+		"values": [2],
 	},
 	"overcharge": {
 		"branch": "combat", "lane": 0, "pos": Vector2i(3, 2), "requires": ["staff_mastery"],
 		"name": "마력 과부하", "desc": "지팡이 투사체 속도·사거리 +%s%%",
-		"costs": [12, 24], "values": [25, 50],
+		"values": [25, 50],
 	},
 	"first_strike": {
 		"branch": "combat", "lane": 1, "pos": Vector2i(6, 1), "requires": ["keen_edge"],
 		"name": "선제공격", "desc": "체력이 가득 찬 적에게 기본 공격 피해 +%s%%",
-		"costs": [12, 24], "values": [50, 100],
+		"values": [50, 100],
 	},
 	"berserker": {
 		"branch": "combat", "lane": 1, "pos": Vector2i(6, 2), "requires": ["first_strike"],
 		"name": "광전사", "desc": "내 체력이 절반 이하일 때 기본 공격 피해 +%s%%",
-		"costs": [18, 32], "values": [20, 40],
+		"values": [20, 40],
 	},
 	"tactician": {
 		"branch": "combat", "lane": 1, "pos": Vector2i(5, 2), "requires": ["skill_power"],
 		"name": "전술가", "desc": "장비 스킬 쿨타임 -%s%%",
-		"costs": [16, 30], "values": [10, 20],
+		"values": [10, 20],
 	},
 	# --- 생존: 신체 ---
 	"vitality": {
 		"branch": "survival", "lane": 0, "pos": Vector2i(0, 0), "requires": [],
 		"name": "강인함", "desc": "최대 체력 +%s",
-		"costs": [8, 16, 28], "values": [15, 30, 50],
+		"values": [15, 30, 50],
 	},
 	"regeneration": {
 		"branch": "survival", "lane": 0, "pos": Vector2i(0, 1), "requires": ["vitality"],
 		"name": "재생", "desc": "3초 동안 맞지 않으면 초당 체력 %s 회복",
-		"costs": [12, 24, 38], "values": [1, 2, 4],
+		"values": [1, 2, 4],
 	},
 	"last_stand": {
 		"branch": "survival", "lane": 0, "pos": Vector2i(0, 2), "requires": ["regeneration"],
 		"name": "최후의 저항", "desc": "쓰러질 피해를 받으면 체력 1로 버티고 2초 무적 (%s초에 한 번)",
-		"costs": [30, 50], "values": [90, 60],
+		"values": [90, 60],
 	},
 	"quick_return": {
 		"branch": "survival", "lane": 0, "pos": Vector2i(1, 1), "requires": ["vitality"],
 		"name": "빠른 복귀", "desc": "부활 시간 -%s%%",
-		"costs": [10, 22], "values": [25, 50],
+		"values": [25, 50],
 	},
 	"swift": {
 		"branch": "survival", "lane": 0, "pos": Vector2i(2, 0), "requires": [],
 		"name": "날렵함", "desc": "이동 속도 +%s%%",
-		"costs": [10, 22], "values": [8, 16],
+		"values": [8, 16],
 	},
 	"windstep": {
 		"branch": "survival", "lane": 0, "pos": Vector2i(2, 1), "requires": ["swift"],
 		"name": "질풍", "desc": "대시 쿨타임 -%s%%",
-		"costs": [12, 24], "values": [20, 40],
+		"values": [20, 40],
 	},
 	"iron_skin": {
 		"branch": "survival", "lane": 0, "pos": Vector2i(1, 0), "requires": [],
 		"name": "철갑 피부", "desc": "받는 피해 -%s%%",
-		"costs": [10, 20, 34], "values": [8, 15, 22],
+		"values": [8, 15, 22],
 	},
 	"dawn_blessing": {
 		"branch": "survival", "lane": 0, "pos": Vector2i(1, 2), "requires": ["quick_return"],
 		"name": "새벽의 축복", "desc": "아침이 오면 체력을 %s%% 회복",
-		"costs": [12, 24], "values": [50, 100],
+		"values": [50, 100],
 	},
 	"field_medic": {
 		"branch": "survival", "lane": 0, "pos": Vector2i(0, 3), "requires": ["regeneration"],
 		"name": "응급 처치", "desc": "치유 스킬 회복량 +%s%%",
-		"costs": [10, 20], "values": [30, 60],
+		"values": [30, 60],
 	},
 	"sprint_dash": {
 		"branch": "survival", "lane": 0, "pos": Vector2i(2, 2), "requires": ["windstep"],
 		"name": "질주", "desc": "대시 거리 +%s%%",
-		"costs": [12, 24], "values": [25, 50],
+		"values": [25, 50],
 	},
 	"evasive_dash": {
 		"branch": "survival", "lane": 0, "pos": Vector2i(2, 3), "requires": ["sprint_dash"],
 		"name": "잔상", "desc": "대시가 끝난 뒤 %s초 더 무적",
-		"costs": [16, 30], "values": [0.3, 0.6],
+		"values": [0.3, 0.6],
 	},
 	# --- 생존: 채집 ---
 	"bountiful": {
 		"branch": "survival", "lane": 1, "pos": Vector2i(3, 0), "requires": [],
 		"name": "풍요로운 손", "desc": "채집할 때 재료를 %s개 더 얻는다",
-		"costs": [8, 16, 28], "values": [1, 2, 3],
+		"values": [1, 2, 3],
 	},
 	"wide_harvest": {
 		"branch": "survival", "lane": 1, "pos": Vector2i(3, 1), "requires": ["bountiful"],
 		"name": "광역 채집", "desc": "채집할 때 주변 %s칸 안의 나무·바위·광석도 함께 캔다",
-		"costs": [15, 35], "values": [1.0, 1.5],
+		"values": [1.0, 1.5],
 	},
 	"deep_pockets": {
 		"branch": "survival", "lane": 1, "pos": Vector2i(4, 0), "requires": [],
 		"name": "큰 가방", "desc": "가방이 %s칸 늘어난다",
-		"costs": [10, 22], "values": [2, 4],
+		"values": [2, 4],
 	},
 	"scavenger": {
 		"branch": "survival", "lane": 1, "pos": Vector2i(5, 0), "requires": [],
 		"name": "약탈자", "desc": "바이옴 몬스터의 희귀 재료 확률 +%s%%",
-		"costs": [10, 22], "values": [15, 30],
+		"values": [15, 30],
 	},
 	"treasure_hunter": {
 		"branch": "survival", "lane": 1, "pos": Vector2i(5, 1), "requires": ["scavenger"],
 		"name": "보물 사냥꾼", "desc": "상자에서 장비가 나올 확률 +%s%%p",
-		"costs": [14, 28], "values": [10, 20],
+		"values": [10, 20],
 	},
 	"herbalist": {
 		"branch": "survival", "lane": 1, "pos": Vector2i(4, 1), "requires": ["bountiful"],
 		"name": "약초꾼", "desc": "채집할 때마다 체력 %s 회복",
-		"costs": [10, 20], "values": [3, 6],
+		"values": [3, 6],
 	},
 	"prospector": {
 		"branch": "survival", "lane": 1, "pos": Vector2i(3, 2), "requires": ["wide_harvest"],
 		"name": "숙련 채집꾼", "desc": "나무·바위·광석에 주는 피해 +%s%%",
-		"costs": [10, 22], "values": [50, 100],
+		"values": [50, 100],
 	},
 	"harvest_scholar": {
 		"branch": "survival", "lane": 1, "pos": Vector2i(4, 2), "requires": ["herbalist"],
 		"name": "채집 학자", "desc": "채집 경험치 +%s%%",
-		"costs": [14, 28], "values": [50, 100],
+		"values": [50, 100],
 	},
 	# --- 건설: 운영 (효과는 내가 짓거나 고칠 때 적용) ---
 	"frugal_builder": {
 		"branch": "building", "lane": 0, "pos": Vector2i(0, 0), "requires": [],
 		"name": "알뜰한 건축", "desc": "건설 비용 -%s%%",
-		"costs": [10, 22], "values": [15, 30],
+		"values": [15, 30],
 	},
 	"long_reach": {
 		"branch": "building", "lane": 0, "pos": Vector2i(0, 1), "requires": ["frugal_builder"],
 		"name": "긴 팔", "desc": "건설 거리 +%s칸",
-		"costs": [8, 16], "values": [2, 4],
+		"values": [2, 4],
 	},
 	"tower_drill": {
 		"branch": "building", "lane": 0, "pos": Vector2i(1, 1), "requires": ["frugal_builder"],
 		"name": "탑 훈련", "desc": "내가 지은 화살탑 공격 속도 +%s%%",
-		"costs": [14, 28], "values": [25, 50],
+		"values": [25, 50],
 	},
 	"repair_expert": {
 		"branch": "building", "lane": 0, "pos": Vector2i(2, 1), "requires": ["frugal_builder"],
 		"name": "보수 전문가", "desc": "핵 수리량 +%s%%",
-		"costs": [10, 22], "values": [50, 100],
+		"values": [50, 100],
 	},
 	# --- 건설: 방벽 ---
 	"sturdy_build": {
 		"branch": "building", "lane": 1, "pos": Vector2i(3, 0), "requires": [],
 		"name": "튼튼한 기초", "desc": "내가 지은 건물 체력 +%s%%",
-		"costs": [10, 22, 36], "values": [25, 50, 80],
+		"values": [25, 50, 80],
 	},
 	"mending_walls": {
 		"branch": "building", "lane": 1, "pos": Vector2i(3, 1), "requires": ["sturdy_build"],
 		"name": "자가 보수", "desc": "내가 지은 건물이 초당 체력 %s 회복",
-		"costs": [14, 28], "values": [1, 2],
+		"values": [1, 2],
 	},
 	"thorn_walls": {
 		"branch": "building", "lane": 1, "pos": Vector2i(4, 1), "requires": ["sturdy_build"],
 		"name": "가시 벽", "desc": "내가 지은 건물을 때린 적이 피해의 %s%%를 돌려받는다",
-		"costs": [14, 28], "values": [30, 60],
+		"values": [30, 60],
 	},
 	"fortify": {
 		"branch": "building", "lane": 1, "pos": Vector2i(3, 2), "requires": ["mending_walls", "repair_expert"],
 		"name": "긴급 요새화", "desc": "밤이 시작될 때 왕국의 건물과 핵 체력을 %s%% 회복 (한 명만 배워도 적용)",
-		"costs": [30, 50], "values": [30, 60],
+		"values": [30, 60],
 	},
 	"salvage_expert": {
 		"branch": "building", "lane": 0, "pos": Vector2i(0, 2), "requires": ["long_reach"],
 		"name": "해체 전문가", "desc": "철거할 때 돌려받는 자원 +%s%%p",
-		"costs": [8, 16], "values": [25, 50],
+		"values": [25, 50],
 	},
 	"builders_insight": {
 		"branch": "building", "lane": 0, "pos": Vector2i(0, 3), "requires": ["salvage_expert"],
 		"name": "건축가의 깨달음", "desc": "건물을 지을 때마다 경험치 +%s",
-		"costs": [14, 28], "values": [2, 4],
+		"values": [2, 4],
 	},
 	"thrifty_repair": {
 		"branch": "building", "lane": 0, "pos": Vector2i(2, 2), "requires": ["repair_expert"],
 		"name": "자재 절약", "desc": "핵 수리 비용 -%s%%",
-		"costs": [10, 22], "values": [25, 50],
+		"values": [25, 50],
 	},
 	"core_resonance": {
 		"branch": "building", "lane": 0, "pos": Vector2i(2, 3), "requires": ["thrifty_repair"],
 		"name": "핵 공명", "desc": "핵을 수리하면 영토 안 건물도 최대 체력의 %s%% 회복",
-		"costs": [18, 34], "values": [20, 40],
+		"values": [20, 40],
 	},
 	"bulwark_aura": {
 		"branch": "building", "lane": 1, "pos": Vector2i(4, 2), "requires": ["sturdy_build"],
 		"name": "성벽의 가호", "desc": "왕국 영토 안에서 받는 피해 -%s%%",
-		"costs": [12, 24], "values": [15, 30],
+		"values": [15, 30],
 	},
 	"hawk_eye": {
 		"branch": "building", "lane": 2, "pos": Vector2i(5, 2), "requires": ["tower_drill"],
 		"name": "매의 눈", "desc": "내가 지은 화살탑 사거리 +%s%%",
-		"costs": [12, 24], "values": [20, 40],
+		"values": [20, 40],
 	},
 	"sharp_bolts": {
 		"branch": "building", "lane": 2, "pos": Vector2i(6, 2), "requires": ["tower_drill"],
 		"name": "강화 화살촉", "desc": "내가 지은 화살탑 피해 +%s%%",
-		"costs": [12, 24], "values": [25, 50],
+		"values": [25, 50],
 	},
 	"twin_bows": {
 		"branch": "building", "lane": 2, "pos": Vector2i(5, 3), "requires": ["hawk_eye", "sharp_bolts"],
 		"name": "쌍궁 탑", "desc": "내가 지은 화살탑이 %s발씩 쏜다",
-		"costs": [26, 44], "values": [2, 3],
+		"values": [2, 3],
 	},
 }
 
 
 static func max_rank(id: String) -> int:
-	return PASSIVES[id]["costs"].size()
+	return PASSIVES[id]["values"].size()
 
 
 ## rank단계일 때의 효과 값. 0단계면 0

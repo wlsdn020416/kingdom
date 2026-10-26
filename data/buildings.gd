@@ -2,9 +2,10 @@ class_name BuildingDB
 extends RefCounted
 ## 건설 가능한 건물 (D-022). 건설 메뉴(B)는 "category"별 탭(CATEGORIES)으로, 탭 안은 ORDER 순서로 나온다.
 ## sprite_column은 그림 칸, sprite_top은 체력바·메뉴 아이콘용 최상단 y좌표다. 각 건물은 고유 그림을 사용하며 제작대만 단계별 연속 칸이다.
-## "tier": 지으려면 필요한 왕국 제작대 단계 (0이면 언제나). "outside": 왕국 영토 밖에도 지을 수 있다.
+## "tier": 지으려면 필요한 왕국 방어 단계 (0이면 언제나, D-027). 방어 단계는 왕국 핵 창에서 채집 재료로 올린다. "outside": 왕국 영토 밖에도 지을 수 있다.
 ## "storage": 장비 상자 칸 수. 죽으면 장비 가방이 사라지므로 예비 장비는 여기에 맡긴다 (D-014).
-## "workbench": 제작대(RecipeDB). "unique": 왕국에 하나만 지을 수 있다.
+## "workbench": 제작대(RecipeDB). "unique": 왕국에 하나만 지을 수 있다. "door": 플레이어만 드나드는 문.
+## 벽을 뺀 모든 건물(문·공성탑·생활 건물)은 플레이어가 뚫고 지나가고 적은 막힌다 (player_passable(), D-025·D-036).
 ## "thorns"·"regen": 건물 자체의 반사 피해 비율·초당 회복 (가시 벽·자가 보수 패시브와 더해진다).
 ## "tower": 화살탑류. range·interval·damage·speed 외에 pierce, splash(맞힌 적 주변 반경), slow([속도 배수, 초]), shots(한 번에 쏘는 수), lifetime.
 ## 생활: "teleport"(모든 순간이동 탑이 연결), "heal_aura"([반경 칸, 초당 회복]), "depot"(근처에서 가방 자원이 창고로), "reveal"(지을 때 주변 칸 수만큼 지도 탐험), "light"(밤 조명 반경 px).
@@ -12,15 +13,25 @@ extends RefCounted
 const CATEGORIES := ["wall", "siege", "utility"]
 const CATEGORY_NAMES := {"wall": "벽", "siege": "공성탑", "utility": "생활"}
 const ORDER := [
-	"wood_wall", "stone_wall", "palisade", "hardwood_wall", "iron_wall", "obsidian_wall", "essence_wall",
+	"wood_wall", "wood_door", "stone_wall", "palisade", "hardwood_wall", "iron_wall", "obsidian_wall", "essence_wall",
 	"arrow_tower", "ballista", "cannon_tower", "frost_tower", "flame_tower", "thunder_tower",
 	"gear_chest", "workbench", "teleport_tower", "campfire", "supply_depot", "watchtower",
 ]
 const REFUND_RATE := 0.5
+## DEFENSE_UPGRADES[n] = 방어 n단계 → n+1단계 비용. 나무·바위·광석에서 캐는 채집 재료만 든다 (D-027, 수치 임시)
+const DEFENSE_UPGRADES := [
+	{"wood": 40, "stone": 30},
+	{"hardwood": 20, "copper": 15, "stone": 30},
+	{"iron_ore": 20, "coal": 12, "hardwood": 20},
+]
 
 const TYPES := {
 	# --- 벽: 제작대 단계가 오를수록 단단한 벽이 열린다 ---
 	"wood_wall": {"description": "나무 말뚝과 가로 버팀목으로 세운 기본 방어선.","name": "나무벽", "category": "wall", "tier": 0, "sprite_column": 0, "sprite_top": 47, "hp": 120.0, "cost": {"wood": 5}, "color": Color("8a5a2b")},
+	"wood_door": {"description": "튼튼한 문틀에 널빤지 문을 달았습니다. 우리 편은 드나들고 적은 막습니다.",
+		"name": "나무 문", "category": "wall", "tier": 0, "sprite_column": 22, "sprite_top": 44,
+		"hp": 120.0, "cost": {"wood": 8}, "color": Color("8a5a2b"), "door": true,
+	},
 	"stone_wall": {"description": "단단한 석재를 층층이 쌓은 왕국의 기본 성벽.","name": "돌벽", "category": "wall", "tier": 0, "sprite_column": 1, "sprite_top": 47, "hp": 300.0, "cost": {"stone": 8}, "color": Color("9a9ca0")},
 	"palisade": {"description": "구리 못과 날카로운 목재 가시로 접촉한 적을 되받아칩니다.",
 		"name": "가시 목책", "category": "wall", "tier": 1, "sprite_column": 2, "sprite_top": 38,
@@ -97,6 +108,10 @@ const TYPES := {
 }
 
 
+static func max_defense_tier() -> int:
+	return DEFENSE_UPGRADES.size()
+
+
 ## 그 분류(탭)의 건물 id (ORDER 순서)
 static func in_category(category: String) -> Array[String]:
 	var ids: Array[String] = []
@@ -104,6 +119,12 @@ static func in_category(category: String) -> Array[String]:
 		if TYPES[id]["category"] == category:
 			ids.append(id)
 	return ids
+
+
+## 플레이어가 뚫고 지나가는 건물: 벽 탭의 벽을 뺀 전부(문·공성탑·생활 건물, D-036). 적은 그대로 막혀서 부수려 한다
+static func player_passable(id: String) -> bool:
+	var info: Dictionary = TYPES[id]
+	return info["category"] != "wall" or info.get("door", false)
 
 
 ## 알뜰한 건축 패시브(D-020)로 깎인 비용. 자원마다 반올림하고 최소 1개는 낸다
