@@ -32,6 +32,9 @@ var kingdom_sync := KingdomSync.new()
 var map_sync := MapSync.new()
 ## 전략회의 열기·준비 완료는 이걸 거친다 (누가 열든 모두 멈춘다, D-019)
 var meeting_sync := MeetingSync.new()
+## 낮 의뢰 (D-037). 호스트가 굴리고 QuestSync로 참가자에게 보낸다
+var quest_board := QuestBoard.new()
+var quest_sync := QuestSync.new()
 var sound_effects := SoundEffects.new()
 var boss_music := MusicPlayer.new()
 var _steps := {}
@@ -76,6 +79,12 @@ func _ready() -> void:
 	meeting_sync.name = "MeetingSync"
 	meeting_sync.setup(Session.net, self)
 	add_child(meeting_sync)
+	quest_board.name = "QuestBoard"
+	quest_board.setup(world, spawner, map_state, rng, reward_everyone, grow_objects, Session.net.is_host())
+	add_child(quest_board)
+	quest_sync.name = "QuestSync"
+	quest_sync.setup(Session.net, self)
+	add_child(quest_sync)
 	build_mode.place_requested.connect(kingdom_sync.build)
 	build_mode.remove_requested.connect(kingdom_sync.demolish)
 	# 적·웨이브는 호스트만 만든다. 참가자는 CombatSync가 받은 모습만 그린다 (D-017)
@@ -464,6 +473,20 @@ func regrow_resources() -> int:
 	if not grown.is_empty():
 		Events.message.emit("밤사이 나무와 광맥이 다시 자랐습니다 (%d곳)" % grown.size())
 	return grown.size()
+
+
+## 모두가 받는 보상 (낮 의뢰, D-037). 호스트만 부른다. 참가자 몫은 CombatSync로 보낸다
+func reward_everyone(xp: int, resources: Dictionary, at: Vector2) -> void:
+	_learn(resources)
+	grant_reward(xp, resources, at)
+	for peer_id: int in player_sync.remote_ids():
+		combat_sync.send_reward(peer_id, xp, resources, at)
+
+
+## 오브젝트를 새로 놓고 참가자에게도 알린다 (낮 의뢰 광맥, D-037). 호스트만 부른다
+func grow_objects(grown: Array) -> void:
+	world.apply_grown(grown)
+	world_sync.send_regrowth(grown)
 
 
 ## 왕국 영토·건물 칸과 플레이어 바로 옆에는 다시 자라지 않는다 (몸에 끼거나 지을 자리를 막지 않게)

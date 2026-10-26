@@ -83,6 +83,36 @@ func refill_residents() -> int:
 	return spawned
 
 
+## 그 바이옴에서 플레이어와 min_gap(px) 넘게 떨어진 빈칸 하나 (낮 의뢰 자리, D-037). 못 찾으면 World.NO_CELL
+func random_cell(terrain: int, min_gap: float) -> Vector2i:
+	var cells: Array = _terrain_cells.get(terrain, [])
+	if cells.is_empty():
+		return World.NO_CELL
+	for attempt in SPAWN_ATTEMPTS:
+		var cell: Vector2i = cells[_rng.randi_range(0, cells.size() - 1)]
+		var far := true
+		for someone: Node2D in get_tree().get_nodes_in_group("player"):
+			far = far and someone.global_position.distance_to(_world.cell_center(cell)) >= min_gap
+		if far and _world.data.is_walkable(cell) and not _kingdom.is_occupied(cell) and not _near_kingdom(cell):
+			return cell
+	return World.NO_CELL
+
+
+## 서식 몬스터가 있는 바이옴 (지형 id)
+func resident_terrains() -> Array:
+	return _resident_targets.keys()
+
+
+## 낮 의뢰의 특별한 몬스터 (정예·도망자). 서식 수에는 세지 않지만 집이 있어 멀리 가지 않고 먼 곳에서는 잠든다
+func spawn_quest_monster(type_id: String, at: Vector2, hp_scale: float, damage_scale: float) -> Enemy:
+	var enemy := Enemy.new().setup(type_id, false, Balance.wanderer_hp_scale(_day) * hp_scale, Balance.wanderer_damage_scale(_day) * damage_scale)
+	enemy.home = at
+	enemy.avoids_kingdom = not _is_night
+	enemy.position = at
+	_enemy_parent.add_child(enemy)
+	return enemy
+
+
 func _spawn_resident(terrain: int, at: Vector2) -> void:
 	var enemy := Enemy.new().setup(EnemyDB.wanderer_for(terrain), false, Balance.wanderer_hp_scale(_day), Balance.wanderer_damage_scale(_day))
 	enemy.home = at

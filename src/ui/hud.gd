@@ -117,6 +117,7 @@ var game_over_panel: GameOverPanel
 
 var _bag_gauge: BagGauge
 var _minimap: MapView
+var quest_tracker: QuestTracker
 var _main: Main
 var _day_label: Label
 var _core_bar: ProgressBar
@@ -374,6 +375,15 @@ func _build_minimap() -> void:
 	_bag_gauge.offset_bottom = MARGIN + 20 + BagGauge.HEIGHT
 	_bag_gauge.activated.connect(func() -> void: _resource_toggle.button_pressed = not _resource_toggle.button_pressed)
 	add_child(_bag_gauge)
+	# 미니맵 바로 아래 오늘의 낮 의뢰 (D-037)
+	quest_tracker = QuestTracker.new()
+	quest_tracker.anchor_left = 1.0
+	quest_tracker.anchor_right = 1.0
+	quest_tracker.offset_left = -MARGIN - MINIMAP_SIZE
+	quest_tracker.offset_right = -MARGIN
+	quest_tracker.offset_top = MARGIN + MINIMAP_HEIGHT + 8.0
+	add_child(quest_tracker)
+	quest_tracker.setup(_main.quest_board, _main.player)
 
 
 func _build_messages() -> void:

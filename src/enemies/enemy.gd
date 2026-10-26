@@ -19,7 +19,10 @@ const ANIMATION_FRAMES := 4
 const ANIMATION_FPS := 8.0
 const IDLE_ANIMATED := ["slime", "bog_slime", "fire_imp"]  # 보스는 모두 호흡한다
 const SPIRAL_LIFETIME := 2.4
-const SLEEP_CHECK_INTERVAL := 0.5  # 서식 몬스터가 깰지 확인하는 간격(초). 잠든 동안은 이것만 센다
+const SLEEP_CHECK_INTERVAL := 0.5
+const FLEE_RANGE := 9.0 * Balance.TILE  # 도망자가 플레이어를 알아채고 달아나기 시작하는 거리
+const ELITE_SCALE := 1.35  # 정예 몬스터 그림 크기
+const ELITE_TINT := Color(1.25, 1.08, 0.72)  # 서식 몬스터가 깰지 확인하는 간격(초). 잠든 동안은 이것만 센다
 const BULLET_COLOR := Color("d070ff")
 ## take_damage의 source: 플레이어는 멀티플레이 peer id(혼자·호스트 = 1), 화살탑은 이 값
 const SOURCE_TOWER := -1
@@ -45,6 +48,10 @@ var avoids_kingdom := false
 ## 바이옴 서식 몬스터(D-035)의 집과 바이옴. 집이 있으면 사라지지 않고 집 근처를 돌아다닌다. INF·-1이면 서식지 없음
 var home := Vector2.INF
 var home_terrain := -1
+## 낮 의뢰(D-037): 정예는 크고 금빛으로 보이고, 도망자는 플레이어를 피해 달아나며 공격하지 않는다
+var elite := false
+var flees := false
+var speed_scale := 1.0
 var _asleep := false
 var _sleep_check := 0.0
 
@@ -131,7 +138,7 @@ func _physics_process(delta: float) -> void:
 	_flash -= delta
 	var nearest := _nearest_player(false)
 	_target = _nearest_player(avoids_kingdom)
-	var chasing_player := _player_in_aggro()
+	var chasing_player := _player_in_aggro() and not flees
 	# 서식 몬스터는 집에서 너무 멀리까지는 쫓아가지 않는다
 	if chasing_player and home.is_finite() and global_position.distance_to(home) > Balance.RESIDENT_CHASE_LIMIT:
 		chasing_player = false
@@ -140,6 +147,8 @@ func _physics_process(delta: float) -> void:
 		target = _target.global_position
 	elif is_invader:
 		target = _core.global_position
+	elif flees and nearest != null and global_position.distance_to(nearest.global_position) < FLEE_RANGE:
+		target = global_position + nearest.global_position.direction_to(global_position) * 50.0
 	elif home.is_finite() and global_position.distance_to(home) > Balance.RESIDENT_LEASH:
 		target = home
 	else:
@@ -153,7 +162,8 @@ func _physics_process(delta: float) -> void:
 
 	_slow_time -= delta
 	var slowed := _slow_factor if _slow_time > 0.0 else 1.0
-	var speed: float = stats["speed"] * (1.0 if chasing_player or is_invader else 0.4) * _rage("speed") * slowed
+	var running := flees and nearest != null and global_position.distance_to(nearest.global_position) < FLEE_RANGE
+	var speed: float = stats["speed"] * (1.0 if chasing_player or is_invader or running else 0.4) * _rage("speed") * slowed * speed_scale
 	velocity = global_position.direction_to(target) * speed + _knockback
 	if _charge_windup > 0.0:
 		velocity = Vector2.ZERO
@@ -167,7 +177,8 @@ func _physics_process(delta: float) -> void:
 
 	if is_invader:
 		_attack_blockers()
-	_touch_player()
+	if not flees:
+		_touch_player()
 	if not _pattern_timers.is_empty():
 		_run_patterns(delta)
 	queue_redraw()
@@ -219,9 +230,9 @@ func burn_away() -> void:
 	queue_free()
 
 
-## 다른 사람 화면에 그릴 모습: [번호, 종류, 위치, 체력 비율, 애니메이션 칸, 왼쪽 보기, 맞아서 번쩍임]
+## 다른 사람 화면에 그릴 모습: [번호, 종류, 위치, 체력 비율, 애니메이션 칸, 왼쪽 보기, 맞아서 번쩍임, 정예]
 func appearance() -> Array:
-	return [net_id, type_id, global_position, hp / max_hp, _animation_frame, _facing_left, _flash > 0.0]
+	return [net_id, type_id, global_position, hp / max_hp, _animation_frame, _facing_left, _flash > 0.0, elite]
 
 
 ## skip_kingdom: 영토 안의 플레이어는 없는 셈 친다 (낮의 배회 적)
@@ -401,7 +412,7 @@ func _update_animation(delta: float) -> void:
 
 
 func _draw() -> void:
-	draw_body(self, type_id, _animation_frame, _facing_left, _flash > 0.0, hp / max_hp, radius)
+	draw_body(self, type_id, _animation_frame, _facing_left, _flash > 0.0, hp / max_hp, radius, elite)
 
 
 ## 일반 적과 보스는 크기가 다르지만 같은 위치·프레임 계약으로 로컬/원격에서 그린다.
@@ -425,18 +436,24 @@ static func sprite_region(id: String, frame: int) -> Rect2:
 
 
 ## 참가자 화면의 EnemyPuppet도 동일한 고유 외형·호흡·피격·분노 표시를 쓴다.
-static func draw_body(canvas: CanvasItem, id: String, frame: int, facing_left: bool, flashing: bool, hp_ratio: float, body_radius: float) -> void:
+## elite: 낮 의뢰의 정예(D-037). 발밑 금빛 고리와 함께 크고 금빛으로 그린다
+static func draw_body(canvas: CanvasItem, id: String, frame: int, facing_left: bool, flashing: bool, hp_ratio: float, body_radius: float, elite := false) -> void:
 	var info: Dictionary = EnemyDB.TYPES[id]
 	var region := sprite_region(id, frame)
 	var offset := sprite_offset(id)
-	var tint := Color(2.4, 2.4, 2.4) if flashing else Color.WHITE
+	var tint := Color(2.4, 2.4, 2.4) if flashing else (ELITE_TINT if elite else Color.WHITE)
+	var size := ELITE_SCALE if elite else 1.0
+	if elite:
+		canvas.draw_set_transform(Vector2(0, 2), 0.0, Vector2(1.0, 0.4))
+		canvas.draw_arc(Vector2.ZERO, body_radius * 1.6, 0.0, TAU, 32, MenuArt.GOLD, 2.0)
+		canvas.draw_set_transform(Vector2.ZERO)
 	# 분노는 기존 체력 조건을 읽는 연출이다. 서리·늪의 고유색이 사라지지 않게 밝기만 살짝 올린다.
 	if not flashing and info.get("is_boss", false):
 		var phases: Array = info.get("rage", [])
 		if not phases.is_empty() and hp_ratio <= float(phases[0]["at"]):
 			var pulse := 1.0 + BOSS_RAGE_GLOW * (0.5 + 0.5 * sin(frame * TAU / BOSS_ANIMATION_FRAMES))
 			tint = Color(pulse, pulse, pulse)
-	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2(-1 if facing_left else 1, 1))
+	canvas.draw_set_transform(Vector2.ZERO, 0.0, Vector2(-1 if facing_left else 1, 1) * size)
 	canvas.draw_texture_rect_region(sprite_texture(id), Rect2(offset, region.size), region, tint)
 	canvas.draw_set_transform(Vector2.ZERO)
 	if hp_ratio < 1.0:

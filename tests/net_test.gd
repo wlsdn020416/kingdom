@@ -198,6 +198,8 @@ class Runner extends Node:
 		_check(guard.in_kingdom(remote.global_position) and not entered and guard._target == null,
 			"호스트: 낮에 왕국 안의 참가자는 배회 적이 노리지 않고 적도 영토에 들어오지 않음 (D-026)")
 		guard.queue_free()
+		# 낮 의뢰(D-037): 호스트가 첫날 굴린 의뢰 하나를 끝내면 참가자도 완료를 본다
+		main.quest_board._complete(main.quest_board.active()[0])
 		var killer := [0]
 		Events.enemy_killed.connect(func(enemy: Node) -> void: killer[0] = (enemy as Enemy).killed_by)
 		var wolf := Enemy.new().setup("wolf", false)
@@ -245,6 +247,12 @@ class Runner extends Node:
 		await _until(func() -> bool: return Session.net.members.size() < 2, deadline)
 
 	func _client_combat(main: Main, deadline: int) -> void:
+		var board := main.quest_board
+		await _until(func() -> bool: return board.quests.size() == QuestDB.PER_DAY, deadline)
+		_check(board.quests.size() == QuestDB.PER_DAY and main.map_state.quest_markers.size() >= 1,
+			"참가자: 호스트가 굴린 오늘의 의뢰를 받아 지도에 표시 (D-037)")
+		await _until(func() -> bool: return board.quests.any(func(quest: Dictionary) -> bool: return quest["state"] == "done"), deadline)
+		_check(board.quests.any(func(quest: Dictionary) -> bool: return quest["state"] == "done"), "참가자: 호스트가 끝낸 의뢰가 내 화면에서도 완료")
 		var enemies := main.get_node("Enemies")
 		# 바이옴 서식 몬스터(D-035)에도 늑대가 있으므로, 호스트가 내 옆(40px)에 만든 늑대만 지켜본다
 		var wolf_puppet := func() -> EnemyPuppet:
@@ -304,7 +312,10 @@ class Runner extends Node:
 	## 핵 근처로 와서 가방을 입고하고, 벽을 짓는다. 창고·건물은 호스트가 정한 상태를 받는다
 	func _client_kingdom(main: Main, deadline: int) -> void:
 		var data := main.world.data
-		var regrown := func() -> bool: return WorldGenerator.count_resources(data) == data.resource_targets
+		# 첫날 의뢰 광맥(D-037)이 있으면 목표보다 많을 수 있으므로 모든 종류가 목표 이상인지 본다
+		var regrown := func() -> bool:
+			var counts := WorldGenerator.count_resources(data)
+			return data.resource_targets.keys().all(func(key: Vector2i) -> bool: return counts.get(key, 0) >= data.resource_targets[key])
 		await _until(regrown, deadline)
 		_check(regrown.call(), "참가자: 호스트의 아침 재생으로 자란 나무·광맥이 내 월드에도 생김 (D-035)")
 		var kingdom := main.kingdom

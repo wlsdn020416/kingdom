@@ -12,6 +12,8 @@ var _main: Main
 ## 호스트만: 게임 시작 뒤 바뀐 오브젝트 칸 -> 체력. 동기화가 시작되기 전의 변경도 모아 두었다가 한 번에 보낸다
 var _changed := {}
 var _flushed := false
+## 호스트만: 동기화 시작 전에 자란 오브젝트(첫날 의뢰 광맥 등). 시작 신호 뒤에 한 번에 보낸다
+var _pending_grown := []
 
 
 func setup(net: NetSession, main: Main) -> void:
@@ -38,6 +40,9 @@ func _physics_process(_delta: float) -> void:
 	set_physics_process(false)
 	for cell: Vector2i in _changed:
 		_object_state.rpc(cell, _changed[cell])
+	if not _pending_grown.is_empty():
+		_regrown.rpc(_pending_grown)
+		_pending_grown = []
 
 
 func _on_object_changed(cell: Vector2i, hp: float) -> void:
@@ -55,8 +60,12 @@ func send_harvest(peer_id: int, object_id: int, cell: Vector2i, drops: Dictionar
 
 ## 아침 재생으로 자란 [칸, 오브젝트] 목록 (D-035)
 func send_regrowth(grown: Array) -> void:
-	if _net.is_online() and not grown.is_empty():
+	if not _net.is_online() or grown.is_empty():
+		return
+	if _flushed:
 		_regrown.rpc(grown)
+	else:
+		_pending_grown.append_array(grown)
 
 
 func send_chest(peer_id: int, reward: Dictionary, at: Vector2) -> void:

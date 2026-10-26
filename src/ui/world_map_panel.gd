@@ -14,6 +14,7 @@ const LEGEND := [
 	[2, "침공 적", "밤에 왕국으로 오는 적"],
 	[3, "순간이동 탑", "탑끼리 오갈 수 있음"],
 	[4, "핑", "전략회의(T)에서 찍은 곳"],
+	[5, "낮 의뢰", "해 지기 전에 끝내면 모두 보상"],
 ]
 
 var view: MapView
@@ -51,11 +52,11 @@ func setup(map: MapState, clock: DayNight) -> void:
 	var info := section(_canvas, Vector2(624, 72), Vector2(552, 584))
 	_place(info, label("지도 표식", 20, MenuArt.GOLD), Vector2(20, 18), Vector2(300, 30))
 	add_legend(info, Vector2(20, 64))
-	_place(info, rule(512), Vector2(20, 330), Vector2(512, 2))
-	_place(info, label("현황", 20, MenuArt.GOLD), Vector2(20, 348), Vector2(300, 30))
+	_place(info, rule(512), Vector2(20, 380), Vector2(512, 2))
+	_place(info, label("현황", 20, MenuArt.GOLD), Vector2(20, 398), Vector2(300, 30))
 	_status = label("", 16, MenuArt.TEXT)
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_place(info, _status, Vector2(20, 388), Vector2(512, 140))
+	_place(info, _status, Vector2(20, 438), Vector2(512, 130))
 	resized.connect(_layout)
 	visibility_changed.connect(func() -> void:
 		if visible:

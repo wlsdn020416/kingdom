@@ -178,7 +178,7 @@ func _snapshot(enemies: Array, phase: int, day: int, time: float, core_hp: float
 			puppet = EnemyPuppet.new().setup(look[1], look[2])
 			_main.get_node("Enemies").add_child(puppet)
 			_puppets[id] = puppet
-		puppet.apply(look[2], look[3], look[4], look[5], look[6])
+		puppet.apply(look[2], look[3], look[4], look[5], look[6], look[7])
 	# 목록에서 빠진 적은 사라진 것 (아침에 타 버림) 또는 내게서 멀어진 것(SNAPSHOT_RANGE 밖). 다시 가까워지면 새로 만든다
 	for id: int in _puppets.keys():
 		if not seen.has(id):

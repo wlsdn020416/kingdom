@@ -268,3 +268,7 @@ Fx.add_light(owner, radius, energy_scale=1.0)는 광원별 표시 강도를 메�
 
 `WorldGenerator`는 자원을 `RESOURCE_DENSITY`(50%)만큼만 만들고 바이옴·종류별 개수를 `WorldData.resource_targets`에 남긴다. 호스트의 `Main._on_day_started()`가 `World.regrow(rng, blocked)`로 모자란 만큼 다시 자라게 하고 `WorldSync.send_regrowth()`로 참가자에게 `World.apply_grown()`을 시킨다. `WaveSpawner`는 시작할 때 지형별 칸 목록과 서식 수를 정하고(`_plan_residents`), 첫 낮과 매일 아침 `refill_residents()`로 채운다. 서식 몬스터는 `Enemy.home`·`home_terrain`을 가지고 집 근처를 돌아다니며, 플레이어가 `RESIDENT_WAKE_RANGE` 밖이면 잠든다. `CombatSync`는 참가자마다 `SNAPSHOT_RANGE` 안의 적(보스는 항상)만 보낸다. 참가자 쪽 생성기는 꺼져 있어 아침 신호가 와도 채우지 않는다(`can_process()`).
 
+### 낮 의뢰 (D-037)
+
+`QuestBoard`(src/gameplay, Main이 소유)가 의뢰 목록(`quests`, 직렬화 가능한 Dictionary 배열)을 가진다. 호스트에서는 아침 신호(`Events.day_started`)와 첫 물리 프레임에 `roll()`로 굴리고, `WaveSpawner.random_cell()`·`spawn_quest_monster()`로 자리와 정예·도망자를 만들며, 광맥은 `Main.grow_objects()`(World.apply_grown + WorldSync)로 놓는다. 완료는 `Events.enemy_killed`(대상 몬스터)와 `World.object_changed`(광맥 칸)로, 보상은 `Main.reward_everyone()`(내 몫은 grant_reward, 참가자 몫은 CombatSync.send_reward)으로 준다. 참가자는 `QuestSync`가 받은 목록을 `apply_remote()`로 따른다. 표식은 `MapState.quest_markers`를 `MapView`가, 목록은 `QuestTracker`(미니맵 아래)가 그린다. 정예·도망자는 서식 수에 세지 않지만 집이 있어 서식 몬스터처럼 멀리 가지 않고 먼 곳에서는 잠든다(`Enemy.elite`·`flees`·`speed_scale`).
+

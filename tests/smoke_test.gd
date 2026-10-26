@@ -75,6 +75,8 @@ func _ready() -> void:
 	await _check_storage(main)
 	await _check_workbench(main)
 	await _check_weapon_skills(main)
+	# 의뢰 보상이 재료를 알려 주므로 레시피 공개 검사(제작대) 뒤에 둔다
+	await _check_quests(main)
 	await _check_progression(main)
 	await _check_inventory(main)
 	await _check_meeting(main)
@@ -984,6 +986,71 @@ func _check_daytime_kingdom(main: Main) -> void:
 	await _frames(1)
 
 
+## 낮 의뢰(D-037): 아침에 의뢰가 생기고, 정예·보물 고블린·광맥을 끝내면 보상, 해가 지면 실패
+func _check_quests(main: Main) -> void:
+	var board := main.quest_board
+	var player := main.player
+	var world := main.world
+	if player.is_dead:
+		player._respawn()
+	board.roll(1)
+	var kinds := {}
+	var placed_ok := true
+	for quest in board.quests:
+		kinds[quest["kind"]] = true
+		placed_ok = placed_ok and QuestDB.tier_of(quest["terrain"]) <= 1 and Vector2(quest["at"]).distance_to(player.global_position) >= QuestDB.MIN_DISTANCE * Balance.TILE
+	_check(board.active().size() == QuestDB.PER_DAY and kinds.size() == QuestDB.PER_DAY and placed_ok and main.map_state.quest_markers.size() == QuestDB.PER_DAY,
+		"아침에 서로 다른 의뢰 %d개가 가까운 바이옴·플레이어와 떨어진 곳에 생기고 지도에 표시됨" % QuestDB.PER_DAY)
+	await _frames(2)
+	var tracker := main.hud.quest_tracker
+	_check(tracker.visible and tracker._rows.get_child_count() == 1 + QuestDB.PER_DAY * 2, "미니맵 아래 오늘의 의뢰 창에 의뢰가 보임")
+	var gained := []
+	var listen := func(amounts: Dictionary, _at: Vector2) -> void: gained.append(amounts)
+	Events.resources_gained.connect(listen)
+	board.quests.clear()
+	board._start("elite", WorldData.Terrain.FOREST)
+	var elite: Enemy = board._target(board.quests[0]["id"])
+	_check(elite != null and elite.elite and elite.max_hp > EnemyDB.TYPES["wolf"]["hp"] * 3.0, "정예 사냥: 크고 강한 정예 늑대가 나타남")
+	await _frames(1)
+	elite.take_damage(999999.0, Enemy.SOURCE_LOCAL)
+	await _frames(2)
+	_check(board.quests[0]["state"] == "done" and gained.any(func(amounts: Dictionary) -> bool: return amounts.get("tough_hide", 0) >= QuestDB.KINDS["elite"]["drop_amount"][1]),
+		"정예를 잡으면 의뢰 완료, 숲 몬스터 재료(질긴 가죽) 보상")
+	board.quests.clear()
+	board._start("runner", WorldData.Terrain.DESERT)
+	var runner: Enemy = board._target(board.quests[0]["id"])
+	var position_before := player.global_position
+	player.global_position = runner.global_position + Vector2(-4.0 * Balance.TILE, 0)
+	runner._sleep_check = 0.0
+	for i in 3:
+		await get_tree().physics_frame
+	_check(runner.flees and runner.velocity.x > 0.0, "보물 고블린은 다가가면 반대쪽으로 도망감")
+	runner.take_damage(999999.0, Enemy.SOURCE_LOCAL)
+	await _frames(2)
+	_check(board.quests[0]["state"] == "done", "보물 고블린을 잡으면 의뢰 완료")
+	player.global_position = position_before
+	board.quests.clear()
+	board._start("vein", WorldData.Terrain.SNOW)
+	var cells: Array = board._vein_cells[board.quests[0]["id"]]
+	var all_iron := cells.all(func(cell: Vector2i) -> bool: return world.data.get_object(cell) == WorldData.Obj.IRON_ORE)
+	_check(cells.size() == board.quests[0]["total"] and cells.size() >= 4 and all_iron, "운석 광맥: 설원에 철광석 %d개가 솟음" % cells.size())
+	world.damage_object(cells[0], 99999.0, Enemy.SOURCE_LOCAL)
+	_check(board.quests[0]["progress"] == 1 and board.quests[0]["state"] == "active", "광맥을 하나 캐면 진행도 1")
+	for cell: Vector2i in cells:
+		world.damage_object(cell, 99999.0, Enemy.SOURCE_LOCAL)
+	_check(board.quests[0]["state"] == "done", "광맥을 다 캐면 의뢰 완료")
+	Events.resources_gained.disconnect(listen)
+	board.quests.clear()
+	board._start("elite", WorldData.Terrain.GRASS)
+	var leftover: Enemy = board._target(board.quests[0]["id"])
+	board._on_night_started(1)
+	await _frames(1)
+	_check(board.quests[0]["state"] == "failed" and (not is_instance_valid(leftover) or leftover.is_queued_for_deletion()) and main.map_state.quest_markers.is_empty(),
+		"해가 지면 끝내지 못한 의뢰는 실패하고 정예는 사라짐")
+	board.quests.clear()
+	board._publish()
+
+
 ## 아침 재생(D-035): 부서진 나무·바위·광석은 아침에 처음 총량까지 다시 자라고, 바이옴 서식 몬스터도 모자란 만큼 채워진다
 func _check_daily_regrowth(main: Main) -> void:
 	var world := main.world
@@ -1002,10 +1069,12 @@ func _check_daily_regrowth(main: Main) -> void:
 	var before := WorldGenerator.count_resources(data)
 	var short := 0
 	for key: Vector2i in targets:
-		short += targets[key] - before.get(key, 0)
+		short += maxi(0, targets[key] - before.get(key, 0))
 	var grown := main.regrow_resources()
 	var after := WorldGenerator.count_resources(data)
-	_check(broken == 30 and short >= 30 and grown == short and after == targets,
+	# 낮 의뢰 광맥(D-037)은 목표보다 많을 수 있으므로 "목표 이상"으로 본다
+	var full := targets.keys().all(func(key: Vector2i) -> bool: return after.get(key, 0) >= targets[key])
+	_check(broken == 30 and short >= 30 and grown == short and full,
 		"아침 재생: 부서진 %d개만큼 같은 바이옴에 다시 자라 처음 총량으로 (%d개 자람)" % [short, grown])
 	var spawner := main.spawner
 	for enemy in get_tree().get_nodes_in_group("enemies"):

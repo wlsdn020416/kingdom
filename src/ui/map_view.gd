@@ -54,6 +54,8 @@ func _draw() -> void:
 			_draw_marker(3, at, 12.0)
 	for cell in map.pings:
 		_draw_marker(4, _to_map(map.world.cell_center(cell), area), 14.0)
+	for at in map.quest_markers:
+		_draw_marker(5, _to_map(at, area), 16.0)
 	var player := get_tree().get_first_node_in_group("player") as Player
 	if player != null:
 		_draw_marker(1, _to_map(player.global_position, area), 12.0)

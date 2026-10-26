@@ -10,6 +10,8 @@ const MAX_PINGS := 5
 var image: Image
 var texture: ImageTexture
 var pings: Array[Vector2i] = []
+## 진행 중인 낮 의뢰 위치 (월드 좌표, D-037). QuestBoard가 호스트·참가자 모두에서 채운다
+var quest_markers: Array[Vector2] = []
 var world: World
 var kingdom: Kingdom
 var _dirty := false

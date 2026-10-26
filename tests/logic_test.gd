@@ -12,6 +12,7 @@ func _initialize() -> void:
 	_test_cooldown()
 	_test_inventory()
 	_test_recipes()
+	_test_quests()
 	_test_settings()
 	_test_weapon_tree()
 	_test_chest_loot()
@@ -64,6 +65,23 @@ func _test_settings() -> void:
 	_check(not loaded.get_value("hitstop") and is_equal_approx(loaded.get_value("ui_scale"), GameSettings.UI_SCALE_MAX),
 		"저장한 설정을 다시 읽음")
 	_check(GameSettings.volume_db(0.0) <= -79.0 and is_equal_approx(GameSettings.volume_db(1.0), 0.0), "볼륨 0은 끔, 1은 0dB")
+
+
+## 낮 의뢰(D-037): 서식 바이옴마다 광맥·보상이 있고, 날이 갈수록 먼 바이옴 의뢰가 열린다
+func _test_quests() -> void:
+	var problems: Array[String] = []
+	for terrain: int in EnemyDB.RESIDENT_TERRAINS:
+		if not QuestDB.VEIN_OBJECTS.has(terrain):
+			problems.append("%s: 광맥 없음" % WorldData.TERRAIN_NAMES[terrain])
+			continue
+		for kind: String in QuestDB.KINDS:
+			if QuestDB.reward(kind, terrain).is_empty() or QuestDB.xp(kind, terrain) <= 0 or QuestDB.title(kind, terrain) == "":
+				problems.append("%s %s: 보상·제목 없음" % [WorldData.TERRAIN_NAMES[terrain], kind])
+	_check(problems.is_empty(), "의뢰 3종이 서식 바이옴 6곳 모두에 보상·제목·광맥을 가짐 %s" % [problems])
+	_check(QuestDB.max_tier(1) == 1 and QuestDB.max_tier(4) == 1 and QuestDB.max_tier(5) == 2 and QuestDB.max_tier(9) == 3 and QuestDB.max_tier(30) == 3,
+		"의뢰 바이옴 단계: 1~4일 1단계, 5~8일 2단계, 9일부터 3단계")
+	_check(QuestDB.reward("elite", WorldData.Terrain.FOREST).has("tough_hide") and QuestDB.reward("vein", WorldData.Terrain.SNOW).has("iron_ore"),
+		"정예는 그 바이옴 몬스터 재료, 광맥은 그 바이옴 광석을 보상으로")
 
 
 ## 무기 트리(D-028): 0단계 4계열은 처음부터, 1단계에서 갈래 2~3개, 2·3단계는 같은 갈래를 한 단계씩 강화(이전 무기 소모)

@@ -11,6 +11,7 @@ var _hp_ratio := 1.0
 var _frame := 0
 var _facing_left := false
 var _flashing := false
+var _elite := false
 
 
 func setup(id: String, at: Vector2) -> EnemyPuppet:
@@ -20,8 +21,9 @@ func setup(id: String, at: Vector2) -> EnemyPuppet:
 	return self
 
 
-func apply(at: Vector2, hp_ratio: float, frame: int, facing_left: bool, flashing: bool) -> void:
+func apply(at: Vector2, hp_ratio: float, frame: int, facing_left: bool, flashing: bool, elite := false) -> void:
 	_target = at
+	_elite = elite
 	_hp_ratio = hp_ratio
 	_frame = frame
 	_facing_left = facing_left
@@ -43,4 +45,4 @@ func _process(delta: float) -> void:
 
 
 func _draw() -> void:
-	Enemy.draw_body(self, type_id, _frame, _facing_left, _flashing, _hp_ratio, EnemyDB.TYPES[type_id]["radius"])
+	Enemy.draw_body(self, type_id, _frame, _facing_left, _flashing, _hp_ratio, EnemyDB.TYPES[type_id]["radius"], _elite)
