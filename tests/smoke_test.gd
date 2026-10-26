@@ -1010,11 +1010,22 @@ func _check_daily_regrowth(main: Main) -> void:
 	_check(spawner.refill_residents() == 0, "이미 다 차 있으면 아침에도 더 생기지 않음")
 	var resident: Enemy = get_tree().get_nodes_in_group("enemies")[0]
 	resident.global_position = resident.home + Vector2(Balance.RESIDENT_LEASH + 6.0 * Balance.TILE, 0)
-	var far := resident.global_position.distance_to(resident.home)
-	for i in 20:
+	# 먼 서식 몬스터는 잠들므로, 플레이어를 깨어나는 거리 안·쫓기는 거리 밖에 둔다
+	var player_before := main.player.global_position
+	main.player.global_position = resident.global_position + Vector2(0, 20.0 * Balance.TILE)
+	resident._sleep_check = 0.0
+	# 옮긴 자리가 물·바위에 막혔을 수 있으므로 실제 이동 거리 대신 집 쪽으로 가려는지를 본다
+	for i in 3:
 		await get_tree().physics_frame
-	_check(is_instance_valid(resident) and resident.global_position.distance_to(resident.home) < far,
-		"서식지에서 멀어진 몬스터는 사라지지 않고 집으로 돌아감")
+	main.player.global_position = player_before
+	_check(is_instance_valid(resident) and resident.velocity.dot(resident.home - resident.global_position) > 0.0,
+		"서식지에서 멀어진 몬스터는 사라지지 않고 집 쪽으로 돌아감")
+	main.player.global_position = resident.home + Vector2(0, Balance.RESIDENT_WAKE_RANGE + 10.0 * Balance.TILE)
+	resident._sleep_check = 0.0
+	await get_tree().physics_frame
+	await get_tree().physics_frame
+	_check(resident._asleep, "플레이어가 멀면 서식 몬스터는 잠들어 움직이지 않음 (성능)")
+	main.player.global_position = player_before
 	for enemy in get_tree().get_nodes_in_group("enemies"):
 		enemy.queue_free()
 	await _frames(2)
