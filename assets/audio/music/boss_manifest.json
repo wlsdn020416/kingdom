@@ -1,0 +1,27 @@
+{
+  "title": "왕국의 결전",
+  "model": "eleven_music_v2_5",
+  "flow_id": "Q3IuQFFNotiO3iOa7jb0",
+  "prompt": "Instrumental dark medieval fantasy boss battle score, urgent and heroic at a steady 136 BPM in D minor, relentless low-string sixteenth-note ostinatos, a memorable four-note French horn and low brass motif, pounding but controlled timpani and frame drums, hammered dulcimer accents and restrained bright strings. Maintain driving combat energy throughout a 120-second piece with a contrasting tense middle passage and return to the opening rhythmic harmony for a repeatable ending, balanced game soundtrack mix leaving room for attack sound effects, no long quiet intro, no final victory cadence. No vocals, no choir, no speech, no sound effects, no modern electronic beat.",
+  "requested_duration_seconds": 120,
+  "requested_bpm": 136,
+  "generations": [
+    {
+      "id": "SZCmD5uzh2ZoX4TgOCXF",
+      "source": "sources/boss_theme_01.mp3"
+    },
+    {
+      "id": "uFAQI77xhAHGJnDCktFW",
+      "source": "sources/boss_theme_02.mp3"
+    },
+    {
+      "id": "oP7MkzvK3lBuj3cXUfM9",
+      "source": "sources/boss_theme_03.mp3"
+    },
+    {
+      "id": "MYiHeKVUzfevp313lrai",
+      "source": "sources/boss_theme_04.mp3"
+    }
+  ],
+  "selection": "편집 도구가 전투용 지속 에너지·반복 접합부 파형/에너지 차이를 비교해 1개 선택. 최종 음악성·효과음 대비 청음은 사용자 확인 필요."
+}

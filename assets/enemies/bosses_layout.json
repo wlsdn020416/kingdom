@@ -1,0 +1,9 @@
+{
+  "boss": {"row": 0, "top": 15},
+  "alpha_wolf": {"row": 1, "top": 22},
+  "venom_tyrant": {"row": 2, "top": 18},
+  "frost_colossus": {"row": 3, "top": 6},
+  "bog_mother": {"row": 4, "top": 9},
+  "flame_lord": {"row": 5, "top": 4},
+  "kingdom_breaker": {"row": 6, "top": 3}
+}

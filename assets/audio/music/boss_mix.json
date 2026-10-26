@@ -1,0 +1,21 @@
+{
+  "title": "왕국의 결전",
+  "source": "sources/boss_theme_04.mp3",
+  "output": "boss_theme.ogg",
+  "sample_rate": 48000,
+  "channels": 2,
+  "duration_seconds": 98.82354166666667,
+  "requested_bpm": 136,
+  "source_start_seconds": 15.441176470588243,
+  "source_duration_seconds": 100.58825,
+  "crossfade_seconds": 1.7647083333333333,
+  "selection_score": 0.3278611772835282,
+  "window_log_rms_deviation": 0.11648091893421593,
+  "join_log_rms_difference": 0.01382834790166764,
+  "candidates_checked": 132,
+  "gain_db": -3.7735666532176233,
+  "peak_dbfs": -3.5754334076965972,
+  "rms_dbfs": -18.08994558354919,
+  "boundary_delta": 0.01172158494591713,
+  "sha256": "04ff4f9804401a96e2b623c1c850294cc094a74f04db7c58eee3a095f8c7bf05"
+}
