@@ -8,6 +8,8 @@ const EFFECT_TEXTURE := preload("res://assets/combat/attack_effects.png")
 const BODY_ORIGIN := Vector2(0, -4)
 const BODY_LEAN := 0.06
 const HELD_SCALE := 0.5
+const GRIP_OFFSET := Vector2(0, -3)
+const GRIP_REACH := 4.0
 
 var weapon_id := "rusty_sword"
 var aim_direction := Vector2.RIGHT
@@ -92,6 +94,9 @@ func _draw() -> void:
 		draw_set_transform(direction * reach * (1.0 - stretch.x), direction.angle(), stretch)
 		draw_texture_rect_region(WeaponArtDB.effect_texture(effect), Rect2(-size / 2.0, size), WeaponArtDB.effect_region(effect, (_duration - _remaining) / WeaponArtDB.SLASH_TIME))
 		draw_set_transform(Vector2.ZERO, direction.angle())
+	# 왼쪽 조준에서도 활·석궁의 윗면이 뒤집히지 않게 손 기준으로 반사한다.
+	var facing := Vector2(1, -1 if direction.x < 0.0 else 1)
+	draw_set_transform(GRIP_OFFSET + direction * GRIP_REACH, direction.angle(), facing)
 	draw_texture_rect_region(WeaponArtDB.weapon_texture(id), Rect2(-WeaponArtDB.WEAPON_PIVOT * HELD_SCALE, WeaponArtDB.WEAPON_SIZE * HELD_SCALE), WeaponArtDB.weapon_region(id, pose_frame()))
 	draw_set_transform(Vector2.ZERO)
 

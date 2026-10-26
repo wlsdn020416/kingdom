@@ -183,8 +183,10 @@ export_sheet(root..'weapon_tree',64,64,specs,8,function(im,sp,f)
  elseif sp.branch:find('bow') or sp.branch=='long' or sp.branch=='rapid' or sp.branch=='scatter' or sp.branch=='siege' then x=x+({0,-3,-2,-1,0,0,1,0})[f+1];angle=({0,-.06,.05,-.03,0,0,0,0})[f+1]
  else x=x+({0,-2,1,2,1,0,0,0})[f+1];angle=({0,-.1,-.03,.08,.04,0,0,0})[f+1] end
  stamp(base,im,ax,ay,x,y,angle,(sp.branch:find("staff") or sp.branch=="fire" or sp.branch=="frost" or sp.branch=="thunder") and .83 or 1)
- rect(im,x-3,y-1,5,5,C.ink);rect(im,x-2,y,3,3,C.steel);dot(im,x-2,y,C.silver)
- if sp.branch=='twin' then rect(im,x-4,y+8,5,4,C.ink);rect(im,x-3,y+9,3,2,C.steel) end
+ -- 절반 크기에서도 손·소매와 손잡이가 분리되어 읽히도록 2px 덩어리로 묶는다.
+ rect(im,x-7,y-1,6,6,C.ink);rect(im,x-6,y,4,4,C.blue)
+ rect(im,x-3,y-2,6,6,C.ink);rect(im,x-2,y-1,4,4,C.steel);rect(im,x-2,y-1,4,2,C.silver)
+ if sp.branch=='twin' then rect(im,x-4,y+7,6,6,C.ink);rect(im,x-3,y+8,4,4,C.steel);rect(im,x-3,y+8,4,2,C.silver) end
 end,.24)
 local projectile_ids={'long_arrow','yew_arrow','dragon_arrow','swift_arrow','hunter_arrow','storm_arrow','scatter_pellet','heavy_pellet','dragon_pellet','siege_bolt','iron_shell','obsidian_shell','arcane_spark','blaze_ember','inferno_ember','frost_shard','glacier_shard','winter_shard','thunder_spark','storm_spark','tempest_spark','dragon_snipe','charged_arrow','inferno_orb','blaze_orb'}
 export_sheet(root..'weapon_tree_projectiles',32,32,projectile_ids,4,function(im,id,f,row)

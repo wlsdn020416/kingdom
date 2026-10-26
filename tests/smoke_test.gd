@@ -69,6 +69,7 @@ func _ready() -> void:
 	await _check_interact_choice(main)
 	await _check_daily_regrowth(main)
 	await _check_melee(main)
+	_check_worn_alignment()
 	await _check_equipment_panel(main)
 	await _check_build_menu(main)
 	await _check_storage(main)
@@ -436,6 +437,22 @@ func _check_progression_hud(main: Main) -> void:
 
 
 ## 실제 I 창에서 장착·해제·재료 스택·호버 설명·닫기가 함께 동작해야 한다.
+## 몸이 올라가는 걸음에서 장비가 반대로 내려가던 원본 회귀를 확인한다.
+func _check_worn_alignment() -> void:
+	var image := EquipmentVisual.TEXTURE.get_image()
+	var aligned := true
+	for row in ItemArtDB.WORN_ORDER.size():
+		if ItemArtDB.WORN_ORDER[row] == "cloth_shoes":
+			continue  # 발은 몸통 흔들림이 아니라 각 발의 디딤 자세를 따른다.
+		for direction in 3:
+			for step in [0, 2]:
+				var frame: int = direction * 4 + step
+				var still := image.get_region(Rect2i(frame * 24, row * 24, 24, 24)).get_used_rect()
+				var raised := image.get_region(Rect2i((frame + 1) * 24, row * 24, 24, 24)).get_used_rect()
+				aligned = aligned and raised.position.y == still.position.y - 1
+	_check(aligned, "착용 장비 9종·3방향은 몸이 올라가는 걸음에서 함께 1픽셀 상승")
+
+
 func _check_equipment_panel(main: Main) -> void:
 	var player := main.player
 	var panel := main.hud.equipment_panel
