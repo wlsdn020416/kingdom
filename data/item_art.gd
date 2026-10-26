@@ -13,7 +13,10 @@ const MATERIAL_ORDER := ["wood", "stone", "hardwood", "copper", "iron_ore", "mos
 const WORN_ORDER := ["bomb_bag", "wooden_shield", "leather_cap", "iron_helm", "guardian_armor", "chain_mail", "flame_armor", "cloth_shoes", "life_charm", "war_horn"]
 
 
+## 무기 아이콘은 실제 손에 드는 외형과 같은 원본을 쓴다
 static func icon(id: String) -> AtlasTexture:
+	if ItemDB.ITEMS.has(id) and ItemDB.ITEMS[id].has("weapon"):
+		return WeaponArtDB.icon(id)
 	var index := ORDER.find(id)
 	if index < 0:
 		return null

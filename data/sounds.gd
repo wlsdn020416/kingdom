@@ -1,10 +1,13 @@
 class_name SoundDB
 extends RefCounted
-## 효과음의 파일·음량·연속 재생 간격과 시작 화면 음악. 원본은 assets/audio/에 있다.
+## 효과음의 파일·음량·연속 재생 간격과 메뉴·보스전 음악. 원본은 assets/audio/에 있다.
 
 const TITLE_MUSIC := preload("res://assets/audio/music/title_theme.ogg")
 const TITLE_MUSIC_VOLUME_DB := -8.0
 const TITLE_MUSIC_FADE_SECONDS := 1.6
+const BOSS_MUSIC := preload("res://assets/audio/music/boss_theme.ogg")
+const BOSS_MUSIC_VOLUME_DB := -7.0
+const BOSS_MUSIC_FADE_SECONDS := 1.2
 
 const ROOT := "res://assets/audio/sfx/"
 const GROUPS := {
@@ -38,11 +41,12 @@ static func catalog() -> Dictionary:
 	return result
 
 
+## 무기 계열별 기본 공격 소리 (D-028 무기 트리는 계열로 묶는다)
 static func weapon(id: String) -> String:
-	match id:
-		"old_bow": return "bow_shoot"
-		"scatter_crossbow": return "crossbow_shoot"
-		"fire_staff": return "magic_shoot"
+	match ItemDB.ITEMS.get(id, {}).get("weapon", {}).get("family", ""):
+		"bow": return "bow_shoot"
+		"crossbow": return "crossbow_shoot"
+		"staff": return "magic_shoot"
 		_: return "sword_swing"
 
 
